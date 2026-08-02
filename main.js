@@ -73,6 +73,7 @@ function cssColor(varName){
 
   function build(){
     const rect = canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;   // hidden (e.g. deep-linked to another screen)
     W = Math.round(rect.width * dpr); H = Math.round(rect.height * dpr);
     canvas.width = W; canvas.height = H;
     const targets = sampleTargets(W, H);
@@ -131,12 +132,13 @@ function cssColor(varName){
     requestAnimationFrame(tick);
   }
 
-  function drawStatic(){ for(const p of particles){p.x=p.tx;p.y=p.ty;} ctx.clearRect(0,0,W,H); ctx.fillStyle=`rgb(${inkRGB})`; for(const p of particles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fill();} }
-  // build now with fallback serif; re-sample once the webfont lands (sharper letterforms)
-  build();
-  if (reduced) drawStatic(); else requestAnimationFrame(tick);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { build(); if (reduced) drawStatic(); });
-  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { build(); if (reduced) drawStatic(); }, 200); });
+  function drawStatic(){ if(!W) return; for(const p of particles){p.x=p.tx;p.y=p.ty;} ctx.clearRect(0,0,W,H); ctx.fillStyle=`rgb(${inkRGB})`; for(const p of particles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fill();} }
+  const rebuild = () => { build(); if (reduced) drawStatic(); };
+  // (re)build whenever the canvas gains size — handles deep-links to other screens,
+  // returning to Home, resizes, and orientation changes, all in one hook
+  new ResizeObserver(rebuild).observe(canvas);
+  if (!reduced) requestAnimationFrame(tick);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(rebuild);
 })();
 
 /* ---------- shoji router --------------------------------------------- */
