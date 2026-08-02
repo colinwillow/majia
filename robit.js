@@ -7,8 +7,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const BANDS = 2;      // starkest, most graphic
-const OUT_T = 0.075;  // outline thickness (normalised units)
+const OUT_T = 0.05;   // outline thickness (normalised units) — finer pen line
 const TARGET = 2.4;
+const FACE   = -0.12; // fixed 3/4-ish facing (no auto-orbit — reads as a flat character)
 
 function cvar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function hexToColor(hex){ return new THREE.Color(hex || '#000'); }
@@ -68,7 +69,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   applyLook(model);
   model.traverse(o => { if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) if (!bones.includes(b)) bones.push(b); });
   pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
-  pivot.rotation.y = -0.4;
+  pivot.rotation.y = FACE;
   mixer = new THREE.AnimationMixer(model);
   for (const c of gltf.animations) clips[c.name] = c;
   idleAction = mixer.clipAction(clips['idle'] || gltf.animations[0]); idleAction.play();
@@ -77,10 +78,13 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     const box = boneBox(); if (!box) return;
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
-    const r = Math.max(size.x, size.y, size.z) * 0.5 * 1.5 + 0.15;
+    // bones under-cover the surface; pad, but tighter now so he reads bigger
+    const r = Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.15 + 0.1;
     const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
-    const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.05;
-    cam.position.set(center.x, center.y, center.z + dist); cam.lookAt(center); cam.updateProjectionMatrix();
+    const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.0;
+    // nudge the look-point up slightly so head + feet sit centred in the frame
+    const cy = center.y + size.y * 0.06;
+    cam.position.set(center.x, cy, center.z + dist); cam.lookAt(center.x, cy, center.z); cam.updateProjectionMatrix();
   }
 
   function normalizeOnce(){
@@ -132,7 +136,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     const dt = clock.getDelta();
     if (mixer) mixer.update(dt);
     if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); framed = true; }
-    if (framed && !oneShot) pivot.rotation.y += 0.004;
+    // no auto-orbit — he holds a fixed facing like a 2D character
     bloom += (bloomTarget - bloom) * 0.1; setBloom();
     renderer.render(scene, cam);
     requestAnimationFrame(loop);

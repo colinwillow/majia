@@ -124,9 +124,7 @@ body::before {
 
 /* ------------------------------------------------------------ home: boids logo */
 .logo-canvas {
-  display: block;
-  width: min(720px, 90vw); height: min(300px, 34vh);
-  pointer-events: none;
+  display: block; width: min(720px, 90vw); height: min(300px, 34vh); pointer-events: none;
 }
 .hero { position: relative; margin-top: 0.5rem; }
 .hero__sub {
@@ -151,12 +149,12 @@ body::before {
 
 /* ------------------------------------------------------------ robits layout */
 .robits-layout {
-  display: flex; align-items: center; justify-content: center; gap: clamp(1rem, 5vw, 4rem);
-  width: 100%; max-width: 1100px; flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: center; gap: clamp(1rem, 4vw, 3rem);
+  width: 100%; max-width: 1240px; flex-wrap: wrap;
 }
 .robit-stage { position: relative; flex: 0 0 auto; }
 .robit-canvas {
-  width: min(440px, 78vw); height: min(500px, 62vh); display: block; cursor: pointer;
+  width: min(500px, 44vw); height: min(560px, 66vh); display: block; cursor: pointer;
   touch-action: none;
 }
 .robit-hint {
@@ -164,7 +162,7 @@ body::before {
   font-size: 0.6rem; letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--ink-dim); opacity: 0.6; pointer-events: none;
 }
-.panel--robits { text-align: left; max-width: 30rem; flex: 1 1 320px; }
+.panel--robits { text-align: left; max-width: 30rem; flex: 0 1 380px; }
 .panel--robits .panel__eyebrow, .panel--robits .panel__actions { justify-content: flex-start; }
 .panel--robits .panel__lede, .panel--robits .spec-grid { margin-left: 0; margin-right: 0; }
 
