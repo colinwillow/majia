@@ -1,0 +1,148 @@
+/* ============================================================
+   MAJIA STUDIO — the ink robit
+   game's rigged robot, cel-shaded + inked, blooms to colour
+   ============================================================ */
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const BANDS = 2;      // starkest, most graphic
+const OUT_T = 0.075;  // outline thickness (normalised units)
+const TARGET = 2.4;
+
+function cvar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function hexToColor(hex){ return new THREE.Color(hex || '#000'); }
+
+export async function initRobit({ canvas, theme, themeListeners, reduced }){
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(34, 1, 0.1, 200);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.04));
+  const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2.5, 4, 4); scene.add(key);
+
+  function gradientMap(steps){
+    const d = new Uint8Array(steps);
+    for (let i=0;i<steps;i++) d[i] = Math.round((i/(steps-1))*255);
+    const t = new THREE.DataTexture(d, steps, 1, THREE.RedFormat);
+    t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+    return t;
+  }
+  const GRAD = gradientMap(BANDS);
+
+  const toonMats = [], outlineU = [], outlineMats = [];
+  function applyLook(root){
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      const toon = new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:GRAD });
+      o.material = toon; toonMats.push(toon);
+      const omat = new THREE.MeshBasicMaterial({ color: hexToColor(cvar('--ink')), side:THREE.BackSide });
+      omat.onBeforeCompile = (sh) => {
+        sh.uniforms.oth = { value: OUT_T }; outlineU.push(sh.uniforms.oth);
+        sh.vertexShader = 'uniform float oth;\n' + sh.vertexShader.replace(
+          '#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed += normalize(objectNormal)*oth;');
+      };
+      outlineMats.push(omat);
+      let ol;
+      if (o.isSkinnedMesh){ ol = new THREE.SkinnedMesh(o.geometry, omat); ol.bind(o.skeleton, o.bindMatrix); }
+      else ol = new THREE.Mesh(o.geometry, omat);
+      ol.frustumCulled = false;
+      ol.position.copy(o.position); ol.quaternion.copy(o.quaternion); ol.scale.copy(o.scale);
+      o.parent.add(ol);
+    });
+  }
+
+  // bone-based bounds (robust for skinned meshes)
+  const bones = [], _v = new THREE.Vector3();
+  function boneBox(){ const b = new THREE.Box3(); for (const bn of bones) b.expandByPoint(bn.getWorldPosition(_v)); return b.isEmpty()?null:b; }
+
+  let mixer=null, model=null, pivot=null, framed=false, warm=0;
+  let idleAction=null, oneShot=null;
+  const clips = {};
+
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const gltf = await loader.loadAsync('./models/robot.glb');
+  model = gltf.scene;
+  applyLook(model);
+  model.traverse(o => { if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) if (!bones.includes(b)) bones.push(b); });
+  pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
+  pivot.rotation.y = -0.4;
+  mixer = new THREE.AnimationMixer(model);
+  for (const c of gltf.animations) clips[c.name] = c;
+  idleAction = mixer.clipAction(clips['idle'] || gltf.animations[0]); idleAction.play();
+
+  function fitCamera(){
+    const box = boneBox(); if (!box) return;
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const r = Math.max(size.x, size.y, size.z) * 0.5 * 1.5 + 0.15;
+    const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
+    const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.05;
+    cam.position.set(center.x, center.y, center.z + dist); cam.lookAt(center); cam.updateProjectionMatrix();
+  }
+
+  function normalizeOnce(){
+    const box = boneBox(); if (!box) return;
+    const size = new THREE.Vector3(); box.getSize(size);
+    const s = TARGET / Math.max(size.y, 0.001);
+    model.scale.multiplyScalar(s);
+    for (const u of outlineU) u.value = OUT_T / s;
+    model.updateWorldMatrix(true, true);
+  }
+
+  // theme: outline follows ink colour
+  function syncTheme(){ const c = hexToColor(cvar('--ink')); for (const m of outlineMats) m.color.copy(c); }
+  themeListeners.add(syncTheme); syncTheme();
+
+  // colour bloom (0 = ink, 1 = full seal) — the 2D→3D "warp into colour"
+  let bloom = 0, bloomTarget = 0;
+  const white = new THREE.Color(0xffffff), tmp = new THREE.Color();
+  function setBloom(){ const seal = hexToColor(cvar('--seal')); tmp.copy(white).lerp(seal, bloom); for (const m of toonMats) m.color.copy(tmp); }
+
+  canvas.addEventListener('pointerenter', () => bloomTarget = 0.55);
+  canvas.addEventListener('pointerleave', () => bloomTarget = 0);
+  canvas.addEventListener('pointerdown', () => {
+    bloomTarget = 1;
+    const clip = clips['front_flip'] || clips['throw_bomb'];
+    if (clip && mixer){
+      const a = mixer.clipAction(clip); a.reset(); a.setLoop(THREE.LoopOnce); a.clampWhenFinished = true;
+      idleAction.crossFadeTo(a, 0.15, false); a.play(); oneShot = a;
+      const back = (e) => { if (e.action !== a) return; a.crossFadeTo(idleAction.reset().play(), 0.25, false); bloomTarget = 0.0; oneShot = null; mixer.removeEventListener('finished', back); };
+      mixer.addEventListener('finished', back);
+    }
+    const hint = document.getElementById('robitHint'); if (hint) hint.style.opacity = '0';
+  });
+
+  function resize(){
+    const r = canvas.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    renderer.setSize(r.width, r.height, false);
+    cam.aspect = r.width / r.height; cam.updateProjectionMatrix();
+    return true;
+  }
+  addEventListener('resize', () => { framed = false; resize(); });
+
+  const clock = new THREE.Clock();
+  let active = false, running = false;
+  function loop(){
+    if (!active){ running = false; return; }
+    running = true;
+    const dt = clock.getDelta();
+    if (mixer) mixer.update(dt);
+    if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); framed = true; }
+    if (framed && !oneShot) pivot.rotation.y += 0.004;
+    bloom += (bloomTarget - bloom) * 0.1; setBloom();
+    renderer.render(scene, cam);
+    requestAnimationFrame(loop);
+  }
+
+  return {
+    setActive(on){
+      active = on;
+      if (on){ clock.getDelta(); if (!resize()) framed = false; if (!running && !reduced) requestAnimationFrame(loop);
+               if (reduced){ resize(); if(!framed && boneBox()){ normalizeOnce(); fitCamera(); framed = true; } setBloom(); renderer.render(scene, cam); } }
+    }
+  };
+}

@@ -10,83 +10,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+  { "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  } }
+  </script>
 </head>
 <body>
-
-  <!-- Falling-leaf shadows on the paper wall -->
-  <canvas id="field" aria-hidden="true"></canvas>
-
-  <!-- Bamboo grove, cast through the wall -->
-  <div class="grove grove--left" aria-hidden="true">
-    <svg viewBox="0 0 200 340" class="grove__svg">
-      <g class="sway sway--slow">
-        <rect x="28" y="20" width="9" height="320" rx="4"/>
-        <rect x="26" y="96"  width="13" height="5" rx="2.5"/>
-        <rect x="26" y="176" width="13" height="5" rx="2.5"/>
-        <rect x="26" y="256" width="13" height="5" rx="2.5"/>
-        <path d="M33 60 C60 40 88 34 116 40 C90 52 62 58 33 60 Z"/>
-        <path d="M33 62 C52 76 74 82 100 80 C76 92 50 86 33 62 Z"/>
-      </g>
-      <g class="sway">
-        <rect x="70" y="70" width="7" height="270" rx="3.5"/>
-        <rect x="68" y="140" width="11" height="4.5" rx="2.2"/>
-        <rect x="68" y="215" width="11" height="4.5" rx="2.2"/>
-        <path d="M74 100 C98 84 122 80 146 86 C122 96 98 100 74 100 Z"/>
-      </g>
-    </svg>
-  </div>
-
-  <div class="grove grove--right" aria-hidden="true">
-    <svg viewBox="0 0 260 380" class="grove__svg">
-      <g class="sway">
-        <rect x="205" y="10" width="10" height="370" rx="5"/>
-        <rect x="203" y="90"  width="14" height="5" rx="2.5"/>
-        <rect x="203" y="175" width="14" height="5" rx="2.5"/>
-        <rect x="203" y="260" width="14" height="5" rx="2.5"/>
-        <path d="M206 50 C178 30 148 26 120 34 C146 46 176 50 206 50 Z"/>
-        <path d="M206 54 C186 70 162 76 136 72 C160 86 188 80 206 54 Z"/>
-        <path d="M210 130 C234 116 252 114 260 118 C244 130 226 134 210 130 Z"/>
-      </g>
-      <g class="sway sway--slow">
-        <rect x="168" y="120" width="7" height="260" rx="3.5"/>
-        <rect x="166" y="200" width="11" height="4.5" rx="2.2"/>
-        <rect x="166" y="285" width="11" height="4.5" rx="2.2"/>
-        <path d="M172 150 C148 136 124 132 102 138 C126 150 148 154 172 150 Z"/>
-      </g>
-      <!-- panda, sitting in the grove with a cut stalk -->
-      <g class="panda-wrap" transform="translate(10 247) scale(0.66)">
-        <g class="panda">
-          <!-- the stalk it holds -->
-          <g class="panda-dark">
-            <rect x="149" y="24" width="8" height="168" rx="4" transform="rotate(7 153 108)"/>
-            <path d="M156 40 C176 28 196 26 212 32 C194 44 174 46 156 40 Z"/>
-            <path d="M154 52 C168 64 184 68 202 66 C186 76 166 70 154 52 Z"/>
-          </g>
-          <!-- white fur: faint shadow -->
-          <g class="panda-fur">
-            <path d="M42 122 C38 168 58 192 100 192 C142 192 160 166 152 120 C146 96 122 92 98 94 C70 96 46 100 42 122 Z"/>
-            <circle cx="88" cy="72" r="40"/>
-          </g>
-          <!-- black fur: dense shadow -->
-          <g class="panda-dark">
-            <circle cx="57" cy="42" r="15"/>
-            <circle cx="119" cy="42" r="15"/>
-            <ellipse cx="72" cy="76" rx="10.5" ry="14" transform="rotate(-18 72 76)"/>
-            <ellipse cx="104" cy="76" rx="10.5" ry="14" transform="rotate(18 104 76)"/>
-            <ellipse cx="88" cy="95" rx="5.5" ry="4"/>
-            <path d="M40 122 C56 102 120 102 142 124 L138 142 C114 124 66 124 44 142 Z"/>
-            <path d="M120 124 C126 106 140 88 152 78 C160 72 170 80 164 90 C154 104 142 118 136 130 Z"/>
-            <ellipse cx="48" cy="148" rx="13" ry="22" transform="rotate(20 48 148)"/>
-            <ellipse cx="72" cy="176" rx="20" ry="14"/>
-            <ellipse cx="124" cy="176" rx="20" ry="14"/>
-          </g>
-          <!-- eyes -->
-          <circle class="panda-eye" cx="74" cy="72" r="3"/>
-          <circle class="panda-eye" cx="102" cy="72" r="3"/>
-        </g>
-      </g>
-    </svg>
-  </div>
 
   <!-- Shoji transition panels -->
   <div class="shoji" id="shoji" aria-hidden="true">
@@ -94,7 +25,6 @@
     <div class="shoji__panel shoji__panel--r"></div>
   </div>
 
-  <!-- Chrome -->
   <header class="chrome">
     <a class="chrome__mark" href="#home" data-nav="home" aria-label="Majia Studio — home">
       <span class="chrome__ring"></span>
@@ -109,117 +39,81 @@
     </nav>
   </header>
 
-  <p class="side-label" aria-hidden="true">GAMES · SOFTWARE · QUIET MACHINES</p>
-
   <main id="stage">
 
-    <!-- ============ SCREEN : HOME ============ -->
+    <!-- ============ HOME ============ -->
     <section class="screen is-active" id="screen-home" data-screen="home" aria-label="Home">
-      <div class="enso" aria-hidden="true">
-        <div class="enso__ring"></div>
-        <div class="enso__orbit"><span class="enso__dot"></span></div>
-      </div>
-
+      <h1 class="sr-only">Majia Studio</h1>
+      <!-- boids logo: particles assemble the wordmark -->
+      <canvas id="logo" class="logo-canvas" aria-hidden="true"></canvas>
       <div class="hero">
-        <p class="hero__eyebrow t-fx">A SMALL STUDIO · BIG WORLDS</p>
-        <h1 class="hero__title t-fx" data-split>MAJIA</h1>
         <p class="hero__sub t-fx">STUDIO</p>
         <p class="hero__lede t-fx">
           We craft games, tools, and quiet machines.<br>
           Currently building <a href="#robits" data-nav="robits" class="lede-link">Robits</a>.
         </p>
         <div class="hero__actions t-fx">
-          <a href="#robits" data-nav="robits" class="btn btn--fill">Enter Robits</a>
+          <a href="#robits" data-nav="robits" class="btn btn--fill" data-morph="robits">Enter Robits</a>
           <a href="#studio" data-nav="studio" class="btn btn--ghost">The Studio</a>
         </div>
       </div>
-
       <p class="screen__coord" aria-hidden="true">01 — HOME</p>
     </section>
 
-    <!-- ============ SCREEN : ROBITS ============ -->
+    <!-- ============ ROBITS ============ -->
     <section class="screen" id="screen-robits" data-screen="robits" aria-label="Robits">
-      <div class="panel">
-        <canvas id="robit3d" class="robit t-fx" width="360" height="240" aria-label="A little robot, cast in shadow"></canvas>
-        <p class="panel__eyebrow t-fx"><span class="pulse-dot"></span>IN DEVELOPMENT</p>
-        <h2 class="panel__title t-fx" data-split>ROBITS</h2>
-        <p class="panel__lede t-fx">
-          Little machines. Latent souls. A game about building small robots
-          and the strange, quiet world they wake up into.
-        </p>
-        <div class="spec-grid t-fx">
-          <div class="spec">
-            <span class="spec__key">STATUS</span>
-            <span class="spec__val">Prototyping</span>
-          </div>
-          <div class="spec">
-            <span class="spec__key">GENRE</span>
-            <span class="spec__val">Redacted, for now</span>
-          </div>
-          <div class="spec">
-            <span class="spec__key">PLATFORM</span>
-            <span class="spec__val">TBA</span>
-          </div>
-          <div class="spec">
-            <span class="spec__key">SIGNAL</span>
-            <span class="spec__val spec__val--live">● Online</span>
-          </div>
+      <div class="robits-layout">
+        <div class="robit-stage" id="robitStage">
+          <canvas id="robit" class="robit-canvas" aria-label="Robit — a little machine, drawn in ink"></canvas>
+          <p class="robit-hint t-fx" id="robitHint">click to charge</p>
         </div>
-        <div class="panel__actions t-fx">
-          <a href="#signal" data-nav="signal" class="btn btn--fill">Follow the signal</a>
-          <a href="#home" data-nav="home" class="btn btn--ghost">Back home</a>
+        <div class="panel panel--robits">
+          <p class="panel__eyebrow t-fx"><span class="pulse-dot"></span>IN DEVELOPMENT</p>
+          <h2 class="panel__title t-fx">ROBITS</h2>
+          <p class="panel__lede t-fx">
+            Little machines. Latent souls. A game about building small robots
+            and the strange, quiet world they wake up into.
+          </p>
+          <div class="spec-grid t-fx">
+            <div class="spec"><span class="spec__key">STATUS</span><span class="spec__val">Prototyping</span></div>
+            <div class="spec"><span class="spec__key">GENRE</span><span class="spec__val">Redacted, for now</span></div>
+            <div class="spec"><span class="spec__key">PLATFORM</span><span class="spec__val">TBA</span></div>
+            <div class="spec"><span class="spec__key">SIGNAL</span><span class="spec__val spec__val--live">● Online</span></div>
+          </div>
+          <div class="panel__actions t-fx">
+            <a href="#signal" data-nav="signal" class="btn btn--fill">Follow the signal</a>
+            <a href="#home" data-nav="home" class="btn btn--ghost">Back home</a>
+          </div>
         </div>
       </div>
       <p class="screen__coord" aria-hidden="true">02 — ROBITS</p>
     </section>
 
-    <!-- ============ SCREEN : STUDIO ============ -->
+    <!-- ============ STUDIO ============ -->
     <section class="screen" id="screen-studio" data-screen="studio" aria-label="Studio">
       <div class="panel">
         <p class="panel__eyebrow t-fx">WHO WE ARE</p>
-        <h2 class="panel__title t-fx" data-split>THE STUDIO</h2>
+        <h2 class="panel__title t-fx">THE STUDIO</h2>
         <p class="panel__lede t-fx">
           Majia is a small developer studio. We make our own things —
           starting with Robits — and we build for others when the work is interesting.
         </p>
         <ul class="craft-list t-fx">
-          <li class="craft">
-            <span class="craft__num">Ⅰ</span>
-            <div>
-              <h3>Games</h3>
-              <p>Original worlds, built slowly and deliberately.</p>
-            </div>
-          </li>
-          <li class="craft">
-            <span class="craft__num">Ⅱ</span>
-            <div>
-              <h3>Software</h3>
-              <p>Tools, apps, and systems with a product designer's eye.</p>
-            </div>
-          </li>
-          <li class="craft">
-            <span class="craft__num">Ⅲ</span>
-            <div>
-              <h3>Experiments</h3>
-              <p>Interactive things that don't fit a category yet.</p>
-            </div>
-          </li>
+          <li class="craft"><span class="craft__num">Ⅰ</span><div><h3>Games</h3><p>Original worlds, built slowly and deliberately.</p></div></li>
+          <li class="craft"><span class="craft__num">Ⅱ</span><div><h3>Software</h3><p>Tools, apps, and systems with a product designer's eye.</p></div></li>
+          <li class="craft"><span class="craft__num">Ⅲ</span><div><h3>Experiments</h3><p>Interactive things that don't fit a category yet.</p></div></li>
         </ul>
-        <div class="panel__actions t-fx">
-          <a href="#signal" data-nav="signal" class="btn btn--ghost">Work with us</a>
-        </div>
+        <div class="panel__actions t-fx"><a href="#signal" data-nav="signal" class="btn btn--ghost">Work with us</a></div>
       </div>
       <p class="screen__coord" aria-hidden="true">03 — STUDIO</p>
     </section>
 
-    <!-- ============ SCREEN : SIGNAL ============ -->
+    <!-- ============ SIGNAL ============ -->
     <section class="screen" id="screen-signal" data-screen="signal" aria-label="Contact">
       <div class="panel panel--center">
         <p class="panel__eyebrow t-fx">OPEN CHANNEL</p>
-        <h2 class="panel__title t-fx" data-split>SIGNAL</h2>
-        <p class="panel__lede t-fx">
-          Say hello, ask about Robits, or bring us a project.
-        </p>
+        <h2 class="panel__title t-fx">SIGNAL</h2>
+        <p class="panel__lede t-fx">Say hello, ask about Robits, or bring us a project.</p>
         <a class="signal-line t-fx" href="mailto:hello@majia.studio">hello@majia.studio</a>
         <p class="panel__note t-fx">Answered by humans.</p>
       </div>
@@ -234,6 +128,6 @@
     <span>Paper, ink, and little machines</span>
   </footer>
 
-  <script src="main.js"></script>
+  <script type="module" src="main.js"></script>
 </body>
 </html>
