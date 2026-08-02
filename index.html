@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Majia Studio</title>
+  <meta name="description" content="Majia Studio — a small developer studio crafting worlds. Makers of Robits.">
+  <link rel="icon" type="image/png" href="icons/majia_icon_1254_no_back.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Particle field -->
+  <canvas id="field" aria-hidden="true"></canvas>
+
+  <!-- Portal transition overlay -->
+  <div class="portal-veil" id="portalVeil" aria-hidden="true">
+    <div class="portal-veil__ring"></div>
+  </div>
+
+  <!-- Chrome -->
+  <header class="chrome">
+    <a class="chrome__mark" href="#home" data-nav="home" aria-label="Majia Studio — home">
+      <span class="chrome__ring"></span>
+      <span class="chrome__word">MAJIA</span>
+    </a>
+    <nav class="chrome__nav" aria-label="Primary">
+      <a href="#home"   data-nav="home"   class="chrome__link is-active"><span>01</span>Portal</a>
+      <a href="#robits" data-nav="robits" class="chrome__link"><span>02</span>Robits</a>
+      <a href="#studio" data-nav="studio" class="chrome__link"><span>03</span>Studio</a>
+      <a href="#signal" data-nav="signal" class="chrome__link"><span>04</span>Signal</a>
+    </nav>
+  </header>
+
+  <main id="stage">
+
+    <!-- ============ SCREEN : HOME / PORTAL ============ -->
+    <section class="screen is-active" id="screen-home" data-screen="home" aria-label="Home">
+      <div class="portal" aria-hidden="true">
+        <div class="portal__halo"></div>
+        <div class="portal__ring portal__ring--outer"></div>
+        <div class="portal__ring portal__ring--mid"></div>
+        <div class="portal__ring portal__ring--inner"></div>
+        <div class="portal__core"></div>
+      </div>
+
+      <div class="hero">
+        <p class="hero__eyebrow t-fx">A SMALL STUDIO · BIG WORLDS</p>
+        <h1 class="hero__title t-fx" data-split>MAJIA</h1>
+        <p class="hero__sub t-fx">STUDIO</p>
+        <p class="hero__lede t-fx">
+          We craft games, tools, and quiet machines.<br>
+          Currently building <a href="#robits" data-nav="robits" class="lede-link">Robits</a>.
+        </p>
+        <div class="hero__actions t-fx">
+          <a href="#robits" data-nav="robits" class="btn btn--neon">Enter Robits</a>
+          <a href="#studio" data-nav="studio" class="btn btn--ghost">The Studio</a>
+        </div>
+      </div>
+
+      <p class="screen__coord" aria-hidden="true">◍ PORTAL — 01</p>
+    </section>
+
+    <!-- ============ SCREEN : ROBITS ============ -->
+    <section class="screen" id="screen-robits" data-screen="robits" aria-label="Robits">
+      <div class="panel">
+        <p class="panel__eyebrow t-fx"><span class="pulse-dot"></span>IN DEVELOPMENT</p>
+        <h2 class="panel__title panel__title--neon t-fx" data-split>ROBITS</h2>
+        <p class="panel__lede t-fx">
+          Little machines. Latent souls. A game about building small robots
+          and the strange, glowing world they wake up into.
+        </p>
+        <div class="spec-grid t-fx">
+          <div class="spec">
+            <span class="spec__key">STATUS</span>
+            <span class="spec__val">Prototyping</span>
+          </div>
+          <div class="spec">
+            <span class="spec__key">GENRE</span>
+            <span class="spec__val">Redacted, for now</span>
+          </div>
+          <div class="spec">
+            <span class="spec__key">PLATFORM</span>
+            <span class="spec__val">TBA</span>
+          </div>
+          <div class="spec">
+            <span class="spec__key">SIGNAL</span>
+            <span class="spec__val spec__val--live">● Online</span>
+          </div>
+        </div>
+        <p class="panel__note t-fx">
+          More transmissions soon. Follow the signal for first looks.
+        </p>
+        <div class="panel__actions t-fx">
+          <a href="#signal" data-nav="signal" class="btn btn--neon">Follow the signal</a>
+          <a href="#home" data-nav="home" class="btn btn--ghost">Back to portal</a>
+        </div>
+      </div>
+      <p class="screen__coord" aria-hidden="true">◍ ROBITS — 02</p>
+    </section>
+
+    <!-- ============ SCREEN : STUDIO ============ -->
+    <section class="screen" id="screen-studio" data-screen="studio" aria-label="Studio">
+      <div class="panel">
+        <p class="panel__eyebrow t-fx">WHO WE ARE</p>
+        <h2 class="panel__title t-fx" data-split>THE STUDIO</h2>
+        <p class="panel__lede t-fx">
+          Majia is a small developer studio. We make our own things —
+          starting with Robits — and we build for others when the work is interesting.
+        </p>
+        <ul class="craft-list t-fx">
+          <li class="craft">
+            <span class="craft__num">Ⅰ</span>
+            <div>
+              <h3>Games</h3>
+              <p>Original worlds, built slowly and deliberately.</p>
+            </div>
+          </li>
+          <li class="craft">
+            <span class="craft__num">Ⅱ</span>
+            <div>
+              <h3>Software</h3>
+              <p>Tools, apps, and systems with a product designer's eye.</p>
+            </div>
+          </li>
+          <li class="craft">
+            <span class="craft__num">Ⅲ</span>
+            <div>
+              <h3>Experiments</h3>
+              <p>Interactive things that don't fit a category yet.</p>
+            </div>
+          </li>
+        </ul>
+        <div class="panel__actions t-fx">
+          <a href="#signal" data-nav="signal" class="btn btn--ghost">Work with us</a>
+        </div>
+      </div>
+      <p class="screen__coord" aria-hidden="true">◍ STUDIO — 03</p>
+    </section>
+
+    <!-- ============ SCREEN : SIGNAL / CONTACT ============ -->
+    <section class="screen" id="screen-signal" data-screen="signal" aria-label="Contact">
+      <div class="panel panel--center">
+        <p class="panel__eyebrow t-fx">OPEN CHANNEL</p>
+        <h2 class="panel__title t-fx" data-split>SIGNAL</h2>
+        <p class="panel__lede t-fx">
+          Say hello, ask about Robits, or bring us a project.
+        </p>
+        <a class="signal-line t-fx" href="mailto:hello@majia.studio">hello@majia.studio</a>
+        <p class="panel__note t-fx">Transmissions answered by humans.</p>
+      </div>
+      <p class="screen__coord" aria-hidden="true">◍ SIGNAL — 04</p>
+    </section>
+
+  </main>
+
+  <footer class="chrome-foot">
+    <span>© <span id="year"></span> Majia Studio</span>
+    <span class="chrome-foot__dot" aria-hidden="true">·</span>
+    <span>Handcrafted, particle by particle</span>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
