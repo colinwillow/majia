@@ -1,366 +1,210 @@
 /* ============================================================
-   MAJIA STUDIO — shadow engine
-   leaf shadows · a 3D robit cast as silhouette · shoji doors
+   MAJIA STUDIO — app
+   boids wordmark · shoji router · theme · lazy ink robot
    ============================================================ */
 
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- theme ---------------------------------------------------- */
+const THEME_KEY = 'majia-theme';
+const themeListeners = new Set();
+function theme(){ return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'; }
+function applyTheme(t){
+  if (t === 'light') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  try { localStorage.setItem(THEME_KEY, t); } catch(_){}
+  themeListeners.forEach(fn => fn(t));
+}
+let stored = 'light';
+try { stored = localStorage.getItem(THEME_KEY) || 'light'; } catch(_){}
+applyTheme(stored === 'dark' ? 'dark' : 'light');
+document.getElementById('themeFlip').addEventListener('click', () => applyTheme(theme() === 'dark' ? 'light' : 'dark'));
+
+function cssColor(varName){
+  const c = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return c || '#000';
+}
+
+/* ---------- boids wordmark ------------------------------------------- */
 (() => {
-  "use strict";
-
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  /* ----------------------------------------------------------
-     Split titles into chars for the dissolve effect
-     ---------------------------------------------------------- */
-  document.querySelectorAll("[data-split]").forEach((el) => {
-    const text = el.textContent;
-    el.textContent = "";
-    el.setAttribute("aria-label", text);
-    [...text].forEach((c, i) => {
-      const span = document.createElement("span");
-      span.className = "ch";
-      span.textContent = c === " " ? " " : c;
-      span.style.transitionDelay = `${0.05 + i * 0.045}s`;
-      span.setAttribute("aria-hidden", "true");
-      el.appendChild(span);
-    });
-  });
-
-  /* ----------------------------------------------------------
-     Theme — paper by day, ink by night
-     ---------------------------------------------------------- */
-  const PALETTES = {
-    light: { sil: "32, 30, 25",    seal: "194, 69, 47",  jade: "93, 125, 107" },
-    dark:  { sil: "238, 234, 222", seal: "217, 91, 64",  jade: "127, 163, 141" },
-  };
-  let palette = PALETTES.light;
-
-  const THEME_KEY = "majia-theme";
-
-  function applyTheme(theme) {
-    if (theme === "light") {
-      delete document.documentElement.dataset.theme;
-    } else {
-      document.documentElement.dataset.theme = theme;
-    }
-    palette = PALETTES[theme] || PALETTES.light;
-    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
-  }
-
-  let storedTheme = "light";
-  try { storedTheme = localStorage.getItem(THEME_KEY) || "light"; } catch (_) {}
-  applyTheme(storedTheme === "dark" ? "dark" : "light");
-
-  document.getElementById("themeFlip").addEventListener("click", () => {
-    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-  });
-
-  /* ----------------------------------------------------------
-     Leaf shadows — sparse, slow, cast on the wall
-     ---------------------------------------------------------- */
-  const canvas = document.getElementById("field");
-  const ctx = canvas.getContext("2d");
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
+  const canvas = document.getElementById('logo');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(devicePixelRatio || 1, 2);
   let W = 0, H = 0;
-  const mouse = { x: -9999, y: -9999 };
+  let particles = [];
+  const mouse = { x: -1e4, y: -1e4, active: false };
+  let inkRGB = '28,26,22', sealRGB = '194,69,47';
+  let bloom = 0, bloomTarget = 0;   // 0 = ink, 1 = seal colour
 
-  const LEAF_COUNT = () => Math.min(16, Math.max(8, Math.floor(W / 110)));
-  let leaves = [];
-
-  function makeLeaf(scatterY) {
-    return {
-      x: Math.random() * W,
-      y: scatterY ? Math.random() * H : -30 - Math.random() * 60,
-      vy: 0.12 + Math.random() * 0.22,
-      drift: Math.random() * Math.PI * 2,
-      driftSpeed: 0.004 + Math.random() * 0.006,
-      size: 5 + Math.random() * 8,
-      angle: Math.random() * Math.PI * 2,
-      spin: (Math.random() - 0.5) * 0.008,
-      alpha: 0.08 + Math.random() * 0.14,
-      blur: 1 + Math.random() * 2.5,
-      tint: Math.random() > 0.92 ? "seal" : "sil",
-      ix: 0,
+  function readColors(){
+    // pull theme colours as rgb for canvas
+    const probe = document.createElement('canvas').getContext('2d');
+    const toRGB = (hex) => { probe.fillStyle = hex; const m = probe.fillStyle;
+      if (m[0] === '#'){ const n = parseInt(m.slice(1),16); return `${(n>>16)&255},${(n>>8)&255},${n&255}`; }
+      const p = m.match(/\d+/g); return p ? p.slice(0,3).join(',') : '0,0,0';
     };
+    inkRGB = toRGB(cssColor('--ink'));
+    sealRGB = toRGB(cssColor('--seal'));
+  }
+  readColors();
+  themeListeners.add(readColors);
+
+  // sample the wordmark into target points
+  function sampleTargets(w, h){
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const o = off.getContext('2d');
+    o.clearRect(0,0,w,h);
+    o.fillStyle = '#000';
+    o.textAlign = 'center';
+    o.textBaseline = 'middle';
+    const fs = Math.min(w * 0.26, h * 0.72);
+    o.font = `500 ${fs}px "Playfair Display", Georgia, serif`;
+    o.setTransform(1,0,0,1,0,0);
+    o.fillText('MAJIA', w/2, h/2 + fs*0.04);
+    const img = o.getImageData(0,0,w,h).data;
+    const pts = [];
+    const step = Math.max(3, Math.round(w/300)) * dpr;
+    for (let y=0; y<h; y+=step)
+      for (let x=0; x<w; x+=step)
+        if (img[(y*w+x)*4+3] > 128) pts.push({ x, y });
+    return pts;
   }
 
-  function resize() {
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const n = LEAF_COUNT();
-    while (leaves.length < n) leaves.push(makeLeaf(true));
-    leaves.length = n;
+  function build(){
+    const rect = canvas.getBoundingClientRect();
+    W = Math.round(rect.width * dpr); H = Math.round(rect.height * dpr);
+    canvas.width = W; canvas.height = H;
+    const targets = sampleTargets(W, H);
+    // reuse existing particle positions where possible for a smooth remorph
+    const prev = particles;
+    particles = targets.map((t, i) => {
+      const p = prev[i] || {
+        x: Math.random()*W, y: Math.random()*H,
+        vx: 0, vy: 0, r: (0.8 + Math.random()*0.9) * dpr,
+      };
+      p.tx = t.x; p.ty = t.y;
+      return p;
+    });
   }
 
-  window.addEventListener("resize", resize);
-  resize();
-
-  window.addEventListener("pointermove", (e) => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
+  // map window pointer to canvas space
+  addEventListener('pointermove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * dpr;
+    mouse.y = (e.clientY - rect.top) * dpr;
+    mouse.active = true;
   });
+  addEventListener('pointerleave', () => mouse.active = false);
 
-  function drawLeaf(l) {
-    ctx.save();
-    ctx.translate(l.x, l.y);
-    ctx.rotate(l.angle);
-    ctx.filter = `blur(${l.blur}px)`;
-    ctx.fillStyle = `rgba(${palette[l.tint]}, ${l.alpha})`;
-    // bamboo leaf: two shallow arcs meeting at the tips
-    const s = l.size;
-    ctx.beginPath();
-    ctx.moveTo(-s, 0);
-    ctx.quadraticCurveTo(0, -s * 0.42, s, 0);
-    ctx.quadraticCurveTo(0, s * 0.42, -s, 0);
-    ctx.fill();
-    ctx.restore();
+  // colour bloom when hovering the primary CTA
+  const cta = document.querySelector('[data-morph]');
+  if (cta){
+    cta.addEventListener('pointerenter', () => bloomTarget = 1);
+    cta.addEventListener('pointerleave', () => bloomTarget = 0);
   }
 
-  function tickLeaves() {
-    ctx.clearRect(0, 0, W, H);
-
-    for (const l of leaves) {
-      l.drift += l.driftSpeed;
-      l.angle += l.spin;
-      l.x += Math.sin(l.drift) * 0.4 + l.ix;
-      l.y += l.vy;
-      l.ix *= 0.94;
-
-      // a passing hand stirs the shadows, gently
-      const mdx = l.x - mouse.x;
-      const mdy = l.y - mouse.y;
-      const d2 = mdx * mdx + mdy * mdy;
-      if (d2 < 9000) {
-        const d = Math.sqrt(d2) || 1;
-        l.ix += (mdx / d) * 0.12;
-        l.y += (mdy / d) * 0.06;
-      }
-
-      if (l.y > H + 40) {
-        Object.assign(l, makeLeaf(false));
-      }
-      if (l.x < -40) l.x = W + 30;
-      if (l.x > W + 40) l.x = -30;
-
-      drawLeaf(l);
-    }
-
-    requestAnimationFrame(tickLeaves);
-  }
-
-  function gust(dir) {
-    for (const l of leaves) l.ix += dir * (1.5 + Math.random() * 2.5);
-  }
-
-  if (!reducedMotion) requestAnimationFrame(tickLeaves);
-
-  /* ----------------------------------------------------------
-     The Robit — true 3D, rendered as a flat shadow
-     ---------------------------------------------------------- */
-  const rCanvas = document.getElementById("robit3d");
-  const rCtx = rCanvas.getContext("2d");
-  const RW = rCanvas.width, RH = rCanvas.height;
-
-  // cuboid parts: [cx, cy, cz, w, h, d]
-  const PARTS = [
-    [0,  1.28, 0,    1.12, 0.92, 1.0 ],  // head
-    [0,  0.05, 0,    0.92, 1.05, 0.78],  // body
-    [-0.72, 0.18, 0, 0.22, 0.78, 0.22],  // arm L
-    [ 0.72, 0.18, 0, 0.22, 0.78, 0.22],  // arm R
-    [-0.26, -0.92, 0, 0.28, 0.6, 0.3 ],  // leg L
-    [ 0.26, -0.92, 0, 0.28, 0.6, 0.3 ],  // leg R
-    [0, 1.95, 0,     0.07, 0.42, 0.07],  // antenna stem
-  ];
-  const ANTENNA_TIP = [0, 2.22, 0];
-  const EYE = [0.16, 1.3, 0.51];         // on the head's front face
-  const EYE2 = [-0.24, 1.3, 0.51];
-
-  const FACES = [
-    [0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4],
-    [2, 3, 7, 6], [1, 2, 6, 5], [0, 3, 7, 4],
-  ];
-
-  function boxVerts([cx, cy, cz, w, h, d]) {
-    const x = w / 2, y = h / 2, z = d / 2;
-    return [
-      [cx - x, cy - y, cz - z], [cx + x, cy - y, cz - z],
-      [cx + x, cy + y, cz - z], [cx - x, cy + y, cz - z],
-      [cx - x, cy - y, cz + z], [cx + x, cy - y, cz + z],
-      [cx + x, cy + y, cz + z], [cx - x, cy + y, cz + z],
-    ];
-  }
-
-  const TILT = 0.12;
-  const SCALE = 46;
-
-  function project([x, y, z], theta) {
-    const rx = x * Math.cos(theta) + z * Math.sin(theta);
-    const rz = -x * Math.sin(theta) + z * Math.cos(theta);
-    const ry = y * Math.cos(TILT) - rz * Math.sin(TILT);
-    return [RW / 2 + rx * SCALE, RH * 0.78 - ry * SCALE];
-  }
-
-  let theta = 0.6;
-  let lastRobitDraw = 0;
-
-  function drawRobit(now) {
-    // only spend frames when the robits screen is showing
-    if (rCanvas.offsetParent !== null && now - lastRobitDraw > 33) {
-      lastRobitDraw = now;
-      theta += 0.012;
-      const bob = Math.sin(now * 0.0016) * 0.05;
-
-      rCtx.clearRect(0, 0, RW, RH);
-      rCtx.save();
-      rCtx.translate(0, bob * SCALE);
-      rCtx.filter = "blur(1.4px)";
-      rCtx.fillStyle = `rgba(${palette.sil}, 0.88)`;
-
-      for (const part of PARTS) {
-        const verts = boxVerts(part).map((v) => project(v, theta));
-        for (const face of FACES) {
-          rCtx.beginPath();
-          rCtx.moveTo(verts[face[0]][0], verts[face[0]][1]);
-          for (let i = 1; i < 4; i++) rCtx.lineTo(verts[face[i]][0], verts[face[i]][1]);
-          rCtx.closePath();
-          rCtx.fill();
+  function tick(){
+    bloom += (bloomTarget - bloom) * 0.08;
+    ctx.clearRect(0,0,W,H);
+    const R = 46 * dpr, R2 = R*R;
+    const homeVisible = document.getElementById('screen-home').classList.contains('is-active');
+    if (homeVisible){
+      for (const p of particles){
+        // ease toward the target slot — monotonic, crisp, frame-rate independent
+        p.x += (p.tx - p.x) * 0.14;
+        p.y += (p.ty - p.y) * 0.14;
+        // pointer shock-wave: a decaying impulse that scatters, then the ease reforms
+        if (mouse.active){
+          const mx = p.x - mouse.x, my = p.y - mouse.y, d2 = mx*mx + my*my;
+          if (d2 < R2){ const d = Math.sqrt(d2)||1, f = (1 - d/R) * 5; p.vx += (mx/d)*f; p.vy += (my/d)*f; }
         }
+        p.x += p.vx; p.y += p.vy;
+        p.vx *= 0.84; p.vy *= 0.84;
+        const c = bloom > 0.02
+          ? `${Math.round(28+(194-28)*bloom)},${Math.round(26+(69-26)*bloom)},${Math.round(22+(47-22)*bloom)}`
+          : inkRGB;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283);
+        ctx.fillStyle = `rgb(${c})`; ctx.fill();
       }
-
-      // antenna tip
-      const tip = project(ANTENNA_TIP, theta);
-      rCtx.beginPath();
-      rCtx.arc(tip[0], tip[1], 0.09 * SCALE, 0, Math.PI * 2);
-      rCtx.fill();
-
-      // eyes — twin embers, visible when the robit faces us
-      const facing = Math.cos(theta);
-      if (facing > 0.25) {
-        rCtx.filter = "blur(0.5px)";
-        rCtx.fillStyle = `rgba(${palette.seal}, ${Math.min(1, facing * 1.4)})`;
-        for (const eye of [EYE, EYE2]) {
-          const [ex, ey] = project(eye, theta);
-          rCtx.beginPath();
-          rCtx.arc(ex, ey, 3.2, 0, Math.PI * 2);
-          rCtx.fill();
-        }
-      }
-
-      rCtx.restore();
     }
-    if (!reducedMotion) requestAnimationFrame(drawRobit);
+    requestAnimationFrame(tick);
   }
 
-  if (reducedMotion) {
-    drawRobit(1000);
-  } else {
-    requestAnimationFrame(drawRobit);
-  }
-
-  /* ----------------------------------------------------------
-     Screen router — shoji doors slide between screens
-     ---------------------------------------------------------- */
-  const screens = [...document.querySelectorAll(".screen")];
-  const navLinks = [...document.querySelectorAll("[data-nav]")];
-  const shoji = document.getElementById("shoji");
-
-  const SCREEN_NAMES = new Set(screens.map((s) => s.dataset.screen));
-  let current = "home";
-  let transitioning = false;
-
-  function screenEl(name) {
-    return document.querySelector(`[data-screen="${name}"]`);
-  }
-
-  function setActiveNav(name) {
-    document.querySelectorAll(".chrome__link").forEach((l) => {
-      l.classList.toggle("is-active", l.dataset.nav === name);
-    });
-  }
-
-  function goTo(name, { instant = false } = {}) {
-    if (!SCREEN_NAMES.has(name)) name = "home";
-    if (name === current && !instant) return;
-    if (transitioning) return;
-
-    const from = screenEl(current);
-    const to = screenEl(name);
-    current = name;
-    setActiveNav(name);
-
-    if (instant || reducedMotion) {
-      screens.forEach((s) => s.classList.remove("is-active", "is-hidden-fx"));
-      to.classList.add("is-active");
-      return;
-    }
-
-    transitioning = true;
-
-    // 1. doors slide shut; the room dissolves
-    shoji.classList.add("is-closed");
-    from.classList.add("is-hidden-fx");
-    gust(Math.random() > 0.5 ? 1 : -1);
-
-    setTimeout(() => {
-      // 2. swap rooms behind the paper
-      from.classList.remove("is-active", "is-hidden-fx");
-      to.classList.add("is-hidden-fx", "is-active");
-
-      // 3. doors slide open onto the new room
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          shoji.classList.remove("is-closed");
-          setTimeout(() => to.classList.remove("is-hidden-fx"), 180);
-        });
-      });
-
-      setTimeout(() => { transitioning = false; }, 700);
-    }, 580);
-  }
-
-  navLinks.forEach((link) => {
-    link.addEventListener("click", (e) => {
-      const name = link.dataset.nav;
-      e.preventDefault();
-      if (transitioning || name === current) return;
-      if (history.state?.screen !== name) {
-        history.pushState({ screen: name }, "", `#${name}`);
-      }
-      goTo(name);
-    });
-  });
-
-  window.addEventListener("popstate", (e) => {
-    goTo(e.state?.screen || location.hash.replace("#", "") || "home");
-  });
-
-  /* ----------------------------------------------------------
-     Boot
-     ---------------------------------------------------------- */
-  const bootTarget = location.hash.replace("#", "") || "home";
-  const bootScreen = SCREEN_NAMES.has(bootTarget) ? bootTarget : "home";
-  history.replaceState({ screen: bootScreen }, "", `#${bootScreen}`);
-
-  const first = screenEl(bootScreen);
-  screens.forEach((s) => s.classList.remove("is-active"));
-  first.classList.add("is-active");
-  current = bootScreen;
-  setActiveNav(bootScreen);
-
-  if (!reducedMotion) {
-    first.classList.add("is-hidden-fx");
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => first.classList.remove("is-hidden-fx"), 150);
-      });
-    });
-  }
-
-  document.getElementById("year").textContent = new Date().getFullYear();
+  function drawStatic(){ for(const p of particles){p.x=p.tx;p.y=p.ty;} ctx.clearRect(0,0,W,H); ctx.fillStyle=`rgb(${inkRGB})`; for(const p of particles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fill();} }
+  // build now with fallback serif; re-sample once the webfont lands (sharper letterforms)
+  build();
+  if (reduced) drawStatic(); else requestAnimationFrame(tick);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { build(); if (reduced) drawStatic(); });
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { build(); if (reduced) drawStatic(); }, 200); });
 })();
+
+/* ---------- shoji router --------------------------------------------- */
+const screens = [...document.querySelectorAll('.screen')];
+const names = new Set(screens.map(s => s.dataset.screen));
+const shoji = document.getElementById('shoji');
+let current = 'home', transitioning = false;
+let robitApi = null, robitLoading = false;
+
+const screenEl = n => document.querySelector(`[data-screen="${n}"]`);
+function setNav(n){ document.querySelectorAll('.chrome__link').forEach(l => l.classList.toggle('is-active', l.dataset.nav === n)); }
+
+async function ensureRobit(){
+  if (robitApi || robitLoading) return;
+  robitLoading = true;
+  try {
+    const mod = await import('./robit.js');
+    robitApi = await mod.initRobit({ canvas: document.getElementById('robit'), theme, themeListeners, reduced });
+    robitApi.setActive(current === 'robits');
+  } catch (e){ console.warn('robit load failed', e); }
+}
+
+function goTo(name, { instant = false } = {}){
+  if (!names.has(name)) name = 'home';
+  if (name === current && !instant) return;
+  if (transitioning) return;
+  const from = screenEl(current), to = screenEl(name);
+  current = name; setNav(name);
+  if (name === 'robits') ensureRobit();
+
+  if (instant || reduced){
+    screens.forEach(s => s.classList.remove('is-active','is-hidden-fx'));
+    to.classList.add('is-active'); robitApi && robitApi.setActive(name === 'robits'); return;
+  }
+  transitioning = true;
+  shoji.classList.add('is-closed');
+  from.classList.add('is-hidden-fx');
+  setTimeout(() => {
+    from.classList.remove('is-active','is-hidden-fx');
+    to.classList.add('is-hidden-fx','is-active');
+    robitApi && robitApi.setActive(name === 'robits');
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      shoji.classList.remove('is-closed');
+      setTimeout(() => to.classList.remove('is-hidden-fx'), 180);
+    }));
+    setTimeout(() => transitioning = false, 700);
+  }, 580);
+}
+
+document.querySelectorAll('[data-nav]').forEach(link => {
+  link.addEventListener('click', (e) => {
+    const name = link.dataset.nav; e.preventDefault();
+    if (transitioning || name === current) return;
+    if (history.state?.screen !== name) history.pushState({ screen: name }, '', `#${name}`);
+    goTo(name);
+  });
+});
+addEventListener('popstate', (e) => goTo(e.state?.screen || location.hash.replace('#','') || 'home'));
+
+/* ---------- boot ----------------------------------------------------- */
+const boot = names.has(location.hash.replace('#','')) ? location.hash.replace('#','') : 'home';
+history.replaceState({ screen: boot }, '', `#${boot}`);
+screens.forEach(s => s.classList.remove('is-active'));
+screenEl(boot).classList.add('is-active');
+current = boot; setNav(boot);
+if (boot === 'robits') ensureRobit();
+if (!reduced){
+  const f = screenEl(boot); f.classList.add('is-hidden-fx');
+  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => f.classList.remove('is-hidden-fx'), 150)));
+}
+document.getElementById('year').textContent = new Date().getFullYear();
