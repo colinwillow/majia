@@ -53,15 +53,37 @@
         <rect x="166" y="285" width="11" height="4.5" rx="2.2"/>
         <path d="M172 150 C148 136 124 132 102 138 C126 150 148 154 172 150 Z"/>
       </g>
-      <!-- panda, sitting in the grove -->
-      <g class="panda">
-        <ellipse cx="92" cy="330" rx="44" ry="38"/>
-        <circle cx="70" cy="282" r="27"/>
-        <circle cx="50" cy="262" r="9"/>
-        <circle cx="88" cy="260" r="9"/>
-        <ellipse cx="126" cy="344" rx="18" ry="14"/>
-        <ellipse cx="58" cy="348" rx="15" ry="11"/>
-        <rect x="34" y="270" width="6" height="86" rx="3" transform="rotate(14 37 313)"/>
+      <!-- panda, sitting in the grove with a cut stalk -->
+      <g class="panda-wrap" transform="translate(10 247) scale(0.66)">
+        <g class="panda">
+          <!-- the stalk it holds -->
+          <g class="panda-dark">
+            <rect x="149" y="24" width="8" height="168" rx="4" transform="rotate(7 153 108)"/>
+            <path d="M156 40 C176 28 196 26 212 32 C194 44 174 46 156 40 Z"/>
+            <path d="M154 52 C168 64 184 68 202 66 C186 76 166 70 154 52 Z"/>
+          </g>
+          <!-- white fur: faint shadow -->
+          <g class="panda-fur">
+            <path d="M42 122 C38 168 58 192 100 192 C142 192 160 166 152 120 C146 96 122 92 98 94 C70 96 46 100 42 122 Z"/>
+            <circle cx="88" cy="72" r="40"/>
+          </g>
+          <!-- black fur: dense shadow -->
+          <g class="panda-dark">
+            <circle cx="57" cy="42" r="15"/>
+            <circle cx="119" cy="42" r="15"/>
+            <ellipse cx="72" cy="76" rx="10.5" ry="14" transform="rotate(-18 72 76)"/>
+            <ellipse cx="104" cy="76" rx="10.5" ry="14" transform="rotate(18 104 76)"/>
+            <ellipse cx="88" cy="95" rx="5.5" ry="4"/>
+            <path d="M40 122 C56 102 120 102 142 124 L138 142 C114 124 66 124 44 142 Z"/>
+            <path d="M120 124 C126 106 140 88 152 78 C160 72 170 80 164 90 C154 104 142 118 136 130 Z"/>
+            <ellipse cx="48" cy="148" rx="13" ry="22" transform="rotate(20 48 148)"/>
+            <ellipse cx="72" cy="176" rx="20" ry="14"/>
+            <ellipse cx="124" cy="176" rx="20" ry="14"/>
+          </g>
+          <!-- eyes -->
+          <circle class="panda-eye" cx="74" cy="72" r="3"/>
+          <circle class="panda-eye" cx="102" cy="72" r="3"/>
+        </g>
       </g>
     </svg>
   </div>
