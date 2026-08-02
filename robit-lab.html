@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robit — rendering lab</title>
+<style>
+  :root{ --paper:#f6f3ec; --ink:#1c1a16; --dim:#6f6a5e; --line:rgba(28,26,22,.14); --seal:#c2452f; }
+  body.ink{ --paper:#16150f; --ink:#f0ece2; --dim:#97917f; --line:rgba(240,236,226,.16); --seal:#d95b40; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:"Space Grotesk",system-ui,sans-serif}
+  body{background:var(--paper);color:var(--ink);transition:background-color .5s,color .5s}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #c:active{cursor:grabbing}
+  .bar{position:fixed;left:0;right:0;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;padding:0 12px;z-index:5}
+  #top{top:14px}
+  #bottom{bottom:16px}
+  .lbl{width:100%;text-align:center;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);margin-bottom:2px}
+  button{font:inherit;font-size:11px;font-weight:500;letter-spacing:1px;color:var(--ink);background:transparent;
+    border:1px solid var(--line);border-radius:999px;padding:8px 14px;cursor:pointer;transition:.25s}
+  button:hover{border-color:var(--dim)}
+  button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  #title{position:fixed;top:14px;left:16px;font-family:"Playfair Display",Georgia,serif;font-size:13px;letter-spacing:3px;color:var(--dim);z-index:5}
+  #msg{position:fixed;top:50%;left:0;right:0;text-align:center;color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">RENDERING LAB</div>
+<div id="msg">loading…</div>
+
+<div class="bar" id="top">
+  <div class="lbl">style</div>
+  <button data-style="ink" class="on">Ink</button>
+  <button data-style="sketch">Boiling sketch</button>
+  <button data-style="charcoal">Charcoal blob</button>
+  <button data-style="hatch">Cross-hatch</button>
+</div>
+
+<div class="bar" id="bottom">
+  <div class="lbl">clip · view</div>
+  <button data-clip="idle" class="on">idle</button>
+  <button data-clip="run_forward">run</button>
+  <button data-clip="front_flip">flip</button>
+  <button data-clip="dance_01">dance</button>
+  <button data-clip="throw_bomb">bomb</button>
+  <button id="spin">spin: off</button>
+  <button id="theme">paper / ink</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three":"./vendor/three/three.module.js", "three/addons/":"./vendor/three/addons/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const canvas=document.getElementById('c'), msg=document.getElementById('msg');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(34,1,0.1,200);
+scene.add(new THREE.AmbientLight(0xffffff,0.06));
+const key=new THREE.DirectionalLight(0xffffff,1.5); key.position.set(2.5,4,4); scene.add(key);
+
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim()||getComputedStyle(document.body).getPropertyValue(n).trim();
+function col(n){ return new THREE.Color(cssVar(n)); }
+
+function gradientMap(steps){ const d=new Uint8Array(steps); for(let i=0;i<steps;i++) d[i]=Math.round(i/(steps-1)*255);
+  const t=new THREE.DataTexture(d,steps,1,THREE.RedFormat); t.magFilter=t.minFilter=THREE.NearestFilter; t.generateMipmaps=false; t.needsUpdate=true; return t; }
+const GRAD2=gradientMap(2), GRAD3=gradientMap(3);
+
+// ---- shared uniforms updated on theme change / per frame ----
+const U={ time:{value:0}, paper:{value:col('--paper')}, ink:{value:col('--ink')} };
+
+// ---- outline hull factory (optionally "boiling") ----
+function outlineMat(thickness, colr, boil){
+  const m=new THREE.MeshBasicMaterial({color:colr, side:THREE.BackSide, transparent:true, opacity:1});
+  m.onBeforeCompile=(sh)=>{
+    sh.uniforms.oth={value:thickness}; sh.uniforms.amp={value:boil?boil:0}; sh.uniforms.time=U.time;
+    sh.vertexShader='uniform float oth; uniform float amp; uniform float time;\n'+sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float n = sin(dot(position.xyz, vec3(12.9,78.2,37.7)) + floor(time*9.0));
+       transformed += normalize(objectNormal) * (oth + amp*n);`);
+  };
+  return m;
+}
+
+// ---- hatch fill (Lambert + screen-space etching) ----
+function hatchMat(){
+  const m=new THREE.MeshLambertMaterial({color:0xffffff});
+  m.onBeforeCompile=(sh)=>{
+    sh.uniforms.uPaper=U.paper; sh.uniforms.uInk=U.ink;
+    sh.fragmentShader='uniform vec3 uPaper; uniform vec3 uInk;\n'
+      +'float hln(vec2 p,float a,float f){ float u=p.x*cos(a)-p.y*sin(a); float t=abs(fract(u*f)-0.5)*2.0; return 1.0-smoothstep(0.10,0.30,t); }\n'
+      +sh.fragmentShader.replace('#include <dithering_fragment>',
+      `#include <dithering_fragment>
+       float lum=dot(gl_FragColor.rgb, vec3(0.299,0.587,0.114));
+       vec2 fc=gl_FragCoord.xy; float ink=0.0;
+       if(lum<0.92) ink=max(ink, hln(fc, 0.785, 0.045));
+       if(lum<0.55) ink=max(ink, hln(fc,-0.785, 0.045));
+       if(lum<0.30) ink=max(ink, hln(fc, 0.0,   0.05));
+       if(lum<0.14) ink=max(ink, hln(fc, 1.5708,0.05));
+       gl_FragColor=vec4(mix(uPaper, uInk, ink), 1.0);`);
+  };
+  return m;
+}
+
+// ---- model ----
+const TARGET=2.4; let model, pivot, mixer, bones=[], clips={}, curAction, framed=false, warm=0;
+const meshes=[]; let hulls=[];   // current outline hull meshes
+const loader=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
+loader.load('./models/robot.glb', gltf=>{
+  model=gltf.scene;
+  model.traverse(o=>{ if(o.isMesh) meshes.push(o); if(o.isSkinnedMesh&&o.skeleton) for(const b of o.skeleton.bones) if(!bones.includes(b)) bones.push(b); });
+  pivot=new THREE.Group(); pivot.add(model); scene.add(pivot); pivot.rotation.y=-0.15;
+  mixer=new THREE.AnimationMixer(model);
+  for(const c of gltf.animations) clips[c.name]=c;
+  play('idle');
+  applyStyle('ink');
+  msg.style.display='none';
+}, undefined, e=>{ msg.textContent='load failed (serve over http): '+e; });
+
+function play(name){
+  const clip=clips[name]||clips['idle']||Object.values(clips)[0]; if(!clip) return;
+  const a=mixer.clipAction(clip); a.reset().play();
+  if(curAction&&curAction!==a) curAction.crossFadeTo(a,0.25,false);
+  curAction=a;
+}
+
+function clearHulls(){ for(const h of hulls){ h.parent&&h.parent.remove(h); h.geometry=null; } hulls=[]; }
+function addHull(mesh, mat){
+  let h; if(mesh.isSkinnedMesh){ h=new THREE.SkinnedMesh(mesh.geometry, mat); h.bind(mesh.skeleton, mesh.bindMatrix); }
+  else h=new THREE.Mesh(mesh.geometry, mat);
+  h.frustumCulled=false; h.position.copy(mesh.position); h.quaternion.copy(mesh.quaternion); h.scale.copy(mesh.scale);
+  mesh.parent.add(h); hulls.push(h);
+}
+
+let curStyle='ink';
+function applyStyle(name){
+  curStyle=name; clearHulls();
+  const inkC=col('--ink');
+  for(const o of meshes){
+    if(name==='ink'){
+      o.material=new THREE.MeshToonMaterial({color:0xffffff, gradientMap:GRAD2});
+      addHull(o, outlineMat(0.05, inkC, 0));
+    } else if(name==='sketch'){
+      o.material=new THREE.MeshToonMaterial({color:0xffffff, gradientMap:GRAD2});
+      addHull(o, outlineMat(0.055, inkC, 0.02));           // wobbling, "boiling" contour
+    } else if(name==='charcoal'){
+      o.material=new THREE.MeshToonMaterial({color:0xffffff, gradientMap:GRAD3});
+      // layered translucent hulls → soft smudged charcoal edge
+      const soft=(th,op)=>{ const m=outlineMat(th, inkC, 0); m.opacity=op; return m; };
+      addHull(o, soft(0.11,0.18)); addHull(o, soft(0.075,0.28)); addHull(o, soft(0.045,0.9));
+    } else if(name==='hatch'){
+      o.material=hatchMat();
+      addHull(o, outlineMat(0.05, inkC, 0));
+    }
+  }
+}
+
+// ---- framing (bone-based) ----
+const _v=new THREE.Vector3();
+function boneBox(){ const b=new THREE.Box3(); for(const bn of bones) b.expandByPoint(bn.getWorldPosition(_v)); return b.isEmpty()?null:b; }
+function normalizeOnce(){ const box=boneBox(); if(!box) return; const s=new THREE.Vector3(); box.getSize(s);
+  model.scale.multiplyScalar(TARGET/Math.max(s.y,0.001)); model.updateWorldMatrix(true,true); }
+function fit(){ const box=boneBox(); if(!box) return; const s=new THREE.Vector3(); box.getSize(s); const c=new THREE.Vector3(); box.getCenter(c);
+  const r=Math.max(s.x,s.y*0.9,s.z)*0.5*1.2+0.1; const fov=cam.fov*Math.PI/180, hf=2*Math.atan(Math.tan(fov/2)*cam.aspect);
+  const dist=r/Math.sin(Math.min(fov,hf)/2)*1.02; const cy=c.y+s.y*0.05;
+  cam.position.set(c.x,cy,c.z+dist); cam.lookAt(c.x,cy,c.z); cam.updateProjectionMatrix(); }
+function resize(){ const r=canvas.getBoundingClientRect(); if(r.width<2)return false; renderer.setSize(r.width,r.height,false); cam.aspect=r.width/r.height; cam.updateProjectionMatrix(); return true; }
+addEventListener('resize',()=>{framed=false;resize();});
+
+// ---- drag to rotate ----
+let dragging=false, px=0, py=0, spin=false;
+canvas.addEventListener('pointerdown',e=>{dragging=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>dragging=false);
+addEventListener('pointermove',e=>{ if(!dragging||!pivot)return; pivot.rotation.y+=(e.clientX-px)*0.01; pivot.rotation.x+=(e.clientY-py)*0.008; px=e.clientX; py=e.clientY; });
+
+// ---- controls ----
+document.querySelectorAll('[data-style]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('[data-style]').forEach(b=>b.classList.remove('on')); btn.classList.add('on'); applyStyle(btn.dataset.style);
+});
+document.querySelectorAll('[data-clip]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('[data-clip]').forEach(b=>b.classList.remove('on')); btn.classList.add('on'); play(btn.dataset.clip);
+});
+document.getElementById('spin').onclick=e=>{ spin=!spin; e.target.textContent='spin: '+(spin?'on':'off'); e.target.classList.toggle('on',spin); };
+document.getElementById('theme').onclick=()=>{ document.body.classList.toggle('ink');
+  U.paper.value.copy(col('--paper')); U.ink.value.copy(col('--ink')); applyStyle(curStyle); };
+
+const clock=new THREE.Clock();
+function tick(){
+  const dt=clock.getDelta(); U.time.value+=dt;
+  if(mixer) mixer.update(dt);
+  if(!framed && resize() && warm++>3){ normalizeOnce(); fit(); framed=true; }
+  if(spin&&pivot) pivot.rotation.y+=0.005;
+  renderer.render(scene,cam);
+  requestAnimationFrame(tick);
+}
+resize(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>
