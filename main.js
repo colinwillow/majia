@@ -40,9 +40,11 @@
   const PARTICLE_COUNT = () => Math.min(160, Math.floor((W * H) / 11000));
   let particles = [];
 
-  const BONE = "242, 238, 230";
-  const NEON_A = "255, 61, 129";
-  const NEON_B = "53, 240, 208";
+  const PALETTES = {
+    dark:  { base: "242, 238, 230", a: "255, 61, 129", b: "53, 240, 208" },
+    light: { base: "19, 19, 17",    a: "224, 36, 94",  b: "0, 158, 134" },
+  };
+  let palette = PALETTES.dark;
 
   function makeParticle() {
     const tint = Math.random();
@@ -54,8 +56,8 @@
       r: 0.6 + Math.random() * 1.5,
       ix: 0,
       iy: 0,
-      // mostly bone-white; a few neon flecks
-      color: tint > 0.94 ? NEON_A : tint > 0.88 ? NEON_B : BONE,
+      // mostly neutral; a few neon flecks
+      tint: tint > 0.94 ? "a" : tint > 0.88 ? "b" : "base",
       alpha: 0.25 + Math.random() * 0.5,
       wobble: Math.random() * Math.PI * 2,
       wobbleSpeed: 0.002 + Math.random() * 0.004,
@@ -142,7 +144,7 @@
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
+      ctx.fillStyle = `rgba(${palette[p.tint]}, ${p.alpha})`;
       ctx.fill();
     }
 
@@ -157,7 +159,7 @@
         const d2 = dx * dx + dy * dy;
         if (d2 < LINK_DIST * LINK_DIST) {
           const t = 1 - Math.sqrt(d2) / LINK_DIST;
-          ctx.strokeStyle = `rgba(${BONE}, ${t * 0.07})`;
+          ctx.strokeStyle = `rgba(${palette.base}, ${t * 0.07})`;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
@@ -294,6 +296,25 @@
       });
     });
   }
+
+  /* ----------------------------------------------------------
+     Ink ⇄ paper — the two faces of the logo
+     ---------------------------------------------------------- */
+  const THEME_KEY = "majia-theme";
+
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    palette = PALETTES[theme] || PALETTES.dark;
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+  }
+
+  let storedTheme = "dark";
+  try { storedTheme = localStorage.getItem(THEME_KEY) || "dark"; } catch (_) {}
+  applyTheme(storedTheme === "light" ? "light" : "dark");
+
+  document.getElementById("themeFlip").addEventListener("click", () => {
+    applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+  });
 
   document.getElementById("year").textContent = new Date().getFullYear();
 })();
