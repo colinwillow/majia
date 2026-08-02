@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robit — ink test</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{background:#f6f3ec}
+  body.ink{background:#16150f}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-family:sans-serif;font-size:13px;color:#777}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg">loading…</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.module.js",
+  "three/addons/": "./vendor/three/addons/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---- theme (paper by default; ?ink for night) ----
+const INK = location.search.includes('ink');
+if (INK) document.body.classList.add('ink');
+const OUTLINE_COLOR = INK ? 0xf0ece2 : 0x14120e;
+const Q = new URLSearchParams(location.search);
+const BANDS  = parseInt(Q.get('bands')) || 3;   // 2 = starkest, 3 = a mid-tone
+const OUT_T  = parseFloat(Q.get('out')) || 0.07; // outline thickness (world units)
+const TARGET = 2.4;    // normalised model height (world units)
+const CLIP   = 'idle';
+const outlineU = [];   // outline thickness uniforms, updated after we know the scale
+
+const canvas = document.getElementById('c');
+const msg = document.getElementById('msg');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(34, 1, 0.1, 200);
+
+// one clear light direction → a definite lit side (paper) and shadow side (ink)
+// a single dominant key keeps the toon ramp a clean black↔white (multiple lights each add
+// their own band and muddy it); a whisper of ambient just lifts the shadow off pure void
+scene.add(new THREE.AmbientLight(0xffffff, 0.04));
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2.5, 4, 4); scene.add(key);
+
+// stepped ramp = cel banding
+function gradientMap(steps){
+  const data = new Uint8Array(steps);
+  for (let i=0;i<steps;i++) data[i] = Math.round((i/(steps-1))*255);
+  const t = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+}
+const GRAD = gradientMap(BANDS);
+const TARGET_R = 2.4;
+
+function applyLook(root){
+  const meshes = []; root.traverse(o=>{ if(o.isMesh) meshes.push(o); });
+  for (const o of meshes){
+    // pure grayscale ink: ignore textures, flat white through the toon ramp
+    const toon = new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:GRAD });
+    o.material = toon;
+    // skinned-aware inverted-hull outline
+    const omat = new THREE.MeshBasicMaterial({ color:OUTLINE_COLOR, side:THREE.BackSide });
+    omat.onBeforeCompile = (sh)=>{
+      sh.uniforms.oth = { value: OUT_T };
+      outlineU.push(sh.uniforms.oth);
+      sh.vertexShader = 'uniform float oth;\n' + sh.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n\ttransformed += normalize(objectNormal)*oth;'
+      );
+    };
+    let ol;
+    if (o.isSkinnedMesh){ ol = new THREE.SkinnedMesh(o.geometry, omat); ol.bind(o.skeleton, o.bindMatrix); }
+    else ol = new THREE.Mesh(o.geometry, omat);
+    ol.frustumCulled = false;
+    ol.position.copy(o.position); ol.quaternion.copy(o.quaternion); ol.scale.copy(o.scale);
+    o.parent.add(ol);
+  }
+}
+
+function measureSphere(root){
+  root.updateWorldMatrix(true, true);
+  const box = new THREE.Box3(), v = new THREE.Vector3(); let found=false;
+  root.traverse(o=>{ const g=o.geometry; if(!g||!g.attributes||!g.attributes.position) return;
+    const pos=g.attributes.position, step=Math.max(1,Math.floor(pos.count/3000));
+    for(let i=0;i<pos.count;i+=step){ v.fromBufferAttribute(pos,i); v.applyMatrix4(o.matrixWorld); box.expandByPoint(v); found=true; } });
+  if(!found||!isFinite(box.min.x)) return null;
+  return box.getBoundingSphere(new THREE.Sphere());
+}
+
+// animated bounds from skeleton bone world positions (robust for skinned meshes)
+const _bones = [];
+function collectBones(root){
+  root.traverse(o=>{ if(o.isSkinnedMesh && o.skeleton) for(const b of o.skeleton.bones) if(!_bones.includes(b)) _bones.push(b); });
+}
+const _v = new THREE.Vector3();
+function boneBox(){
+  const box = new THREE.Box3();
+  for(const b of _bones){ b.getWorldPosition(_v); box.expandByPoint(_v); }
+  return box.isEmpty() ? null : box;
+}
+
+let mixer=null, pivot=null, model=null, framed=false, warm=0;
+const loader = new GLTFLoader();
+loader.load('./models/robot.glb', gltf=>{
+  model = gltf.scene;
+  applyLook(model);
+  collectBones(model);
+  pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
+  pivot.rotation.y = -0.5;   // gentle 3/4 view
+  if (gltf.animations.length){
+    mixer = new THREE.AnimationMixer(model);
+    const clip = gltf.animations.find(a=>a.name===CLIP) || gltf.animations.find(a=>/idle/i.test(a.name)) || gltf.animations[0];
+    mixer.clipAction(clip).play();
+  }
+  msg.style.display='none';
+}, undefined, err=>{ msg.textContent='load fail: '+err; });
+
+// frame the camera to fit the current animated pose (bones + generous margin for surface)
+function fitCamera(){
+  const box = boneBox(); if(!box) return;
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  // bones under-cover the surface (head tip, feet, limbs) — pad
+  const r = Math.max(size.x, size.y, size.z) * 0.5 * 1.45 + 0.15;
+  const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
+  const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.02;
+  cam.position.set(center.x, center.y, center.z + dist);
+  cam.lookAt(center); cam.updateProjectionMatrix();
+}
+function resize(){ renderer.setSize(innerWidth,innerHeight); cam.aspect=innerWidth/innerHeight; framed=false; }
+resize(); addEventListener('resize', resize);
+
+const clock = new THREE.Clock();
+function tick(){
+  const dt = clock.getDelta();
+  if (mixer) mixer.update(dt);
+  // let the pose settle, then normalise scale + fit once
+  if (_bones.length && (!framed && warm++ > 4)){
+    const box = boneBox();
+    if (box){
+      const size = new THREE.Vector3(); box.getSize(size);
+      const h = Math.max(size.y, 0.001);
+      const s = TARGET / h;
+      model.scale.multiplyScalar(s);
+      // outline extrudes in local space then scales with the model — compensate so it stays OUT_T world units
+      for (const u of outlineU) u.value = OUT_T / s;
+      model.updateWorldMatrix(true, true);
+    }
+    fitCamera(); framed = true;
+  }
+  if (pivot) pivot.rotation.y += 0.004;
+  renderer.render(scene, cam);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>
