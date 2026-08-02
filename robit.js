@@ -14,6 +14,35 @@ const FACE   = -0.12; // fixed 3/4-ish facing (no auto-orbit — reads as a flat
 function cvar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function hexToColor(hex){ return new THREE.Color(hex || '#000'); }
 
+// Trim baked dead frames: find the window where any track actually moves and
+// rebuild every track to that window (times rebased to 0), so clips are their
+// true length and loop cleanly. No-op for clips that move across the whole span.
+function trimClip(clip, eps = 1e-4){
+  let start = Infinity, end = 0;
+  for (const tr of clip.tracks){
+    const t = tr.times, v = tr.values, stride = v.length / t.length;
+    for (let i = 1; i < t.length; i++){
+      let d = 0; for (let k = 0; k < stride; k++) d = Math.max(d, Math.abs(v[i*stride+k] - v[(i-1)*stride+k]));
+      if (d > eps){ if (t[i-1] < start) start = t[i-1]; if (t[i] > end) end = t[i]; }
+    }
+  }
+  if (!isFinite(start) || end <= start) return;         // static or already tight
+  const pad = 1/60;
+  start = Math.max(0, start - pad); end = end + pad;
+  for (const tr of clip.tracks){
+    const t = tr.times, v = tr.values, stride = v.length / t.length;
+    const nt = [], nv = [];
+    for (let i = 0; i < t.length; i++){
+      if (t[i] < start - 1e-6 || t[i] > end + 1e-6) continue;
+      nt.push(t[i] - start);
+      for (let k = 0; k < stride; k++) nv.push(v[i*stride+k]);
+    }
+    if (nt.length >= 2){ tr.times = new Float32Array(nt); tr.values = new Float32Array(nv); }
+  }
+  clip.duration = end - start;
+  clip.resetDuration();
+}
+
 export async function initRobit({ canvas, theme, themeListeners, reduced }){
   const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
   renderer.setPixelRatio(Math.min(2, devicePixelRatio));
@@ -60,7 +89,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   function boneBox(){ const b = new THREE.Box3(); for (const bn of bones) b.expandByPoint(bn.getWorldPosition(_v)); return b.isEmpty()?null:b; }
 
   let mixer=null, model=null, pivot=null, framed=false, warm=0;
-  let idleAction=null, oneShot=null;
+  let idleAction=null;
   const clips = {};
 
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -71,8 +100,10 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
   pivot.rotation.y = FACE;
   mixer = new THREE.AnimationMixer(model);
-  for (const c of gltf.animations) clips[c.name] = c;
-  idleAction = mixer.clipAction(clips['idle'] || gltf.animations[0]); idleAction.play();
+  // the game GLB bakes every clip onto one long timeline; trim each to its real motion
+  for (const c of gltf.animations){ trimClip(c); clips[c.name] = c; }
+  idleAction = mixer.clipAction(clips['idle'] || gltf.animations[0]);
+  idleAction.setLoop(THREE.LoopRepeat, Infinity); idleAction.play();
 
   function fitCamera(){
     const box = boneBox(); if (!box) return;
@@ -105,19 +136,11 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   const white = new THREE.Color(0xffffff), tmp = new THREE.Color();
   function setBloom(){ const seal = hexToColor(cvar('--seal')); tmp.copy(white).lerp(seal, bloom); for (const m of toonMats) m.color.copy(tmp); }
 
+  // for now he just holds a looping idle; hover/press only warps the colour in
   canvas.addEventListener('pointerenter', () => bloomTarget = 0.55);
   canvas.addEventListener('pointerleave', () => bloomTarget = 0);
-  canvas.addEventListener('pointerdown', () => {
-    bloomTarget = 1;
-    const clip = clips['front_flip'] || clips['throw_bomb'];
-    if (clip && mixer){
-      const a = mixer.clipAction(clip); a.reset(); a.setLoop(THREE.LoopOnce); a.clampWhenFinished = true;
-      idleAction.crossFadeTo(a, 0.15, false); a.play(); oneShot = a;
-      const back = (e) => { if (e.action !== a) return; a.crossFadeTo(idleAction.reset().play(), 0.25, false); bloomTarget = 0.0; oneShot = null; mixer.removeEventListener('finished', back); };
-      mixer.addEventListener('finished', back);
-    }
-    const hint = document.getElementById('robitHint'); if (hint) hint.style.opacity = '0';
-  });
+  canvas.addEventListener('pointerdown', () => { bloomTarget = 1; });
+  canvas.addEventListener('pointerup', () => { bloomTarget = 0.55; });
 
   function resize(){
     const r = canvas.getBoundingClientRect();

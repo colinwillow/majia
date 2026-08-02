@@ -65,6 +65,19 @@ const cam=new THREE.PerspectiveCamera(34,1,0.1,200);
 scene.add(new THREE.AmbientLight(0xffffff,0.06));
 const key=new THREE.DirectionalLight(0xffffff,1.5); key.position.set(2.5,4,4); scene.add(key);
 
+function trimClip(clip, eps=1e-4){
+  let start=Infinity,end=0;
+  for(const tr of clip.tracks){ const t=tr.times,v=tr.values,st=v.length/t.length;
+    for(let i=1;i<t.length;i++){ let d=0; for(let k=0;k<st;k++) d=Math.max(d,Math.abs(v[i*st+k]-v[(i-1)*st+k]));
+      if(d>eps){ if(t[i-1]<start)start=t[i-1]; if(t[i]>end)end=t[i]; } } }
+  if(!isFinite(start)||end<=start) return;
+  const pad=1/60; start=Math.max(0,start-pad); end+=pad;
+  for(const tr of clip.tracks){ const t=tr.times,v=tr.values,st=v.length/t.length,nt=[],nv=[];
+    for(let i=0;i<t.length;i++){ if(t[i]<start-1e-6||t[i]>end+1e-6)continue; nt.push(t[i]-start); for(let k=0;k<st;k++) nv.push(v[i*st+k]); }
+    if(nt.length>=2){ tr.times=new Float32Array(nt); tr.values=new Float32Array(nv); } }
+  clip.duration=end-start; clip.resetDuration();
+}
+
 const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim()||getComputedStyle(document.body).getPropertyValue(n).trim();
 function col(n){ return new THREE.Color(cssVar(n)); }
 
@@ -119,7 +132,7 @@ loader.load('./models/robot.glb', gltf=>{
   model.traverse(o=>{ if(o.isMesh) meshes.push(o); if(o.isSkinnedMesh&&o.skeleton) for(const b of o.skeleton.bones) if(!bones.includes(b)) bones.push(b); });
   pivot=new THREE.Group(); pivot.add(model); scene.add(pivot); pivot.rotation.y=-0.15;
   mixer=new THREE.AnimationMixer(model);
-  for(const c of gltf.animations) clips[c.name]=c;
+  for(const c of gltf.animations){ trimClip(c); clips[c.name]=c; }
   play('idle');
   applyStyle('ink');
   msg.style.display='none';
