@@ -32,7 +32,7 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
 
   let W = 0, H = 0, DPR = 1, cx = 0, cy = 0;
   let targets = [], particles = [], edges = [];
-  let fit = null, tint = null, mask = null;      // real logo, theme-tinted
+  let fit = null, tint = null, tintSeal = null, mask = null;   // real logo, theme-tinted
   let logoReady = false;
   const logoImg = new Image();
   let spawned = false, t0 = 0, locked = false;
@@ -63,45 +63,56 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
 
   function makeTint(){
     if (!fit) return;
-    tint = document.createElement('canvas');
-    tint.width = Math.max(1, Math.round(fit.dw*DPR)); tint.height = Math.max(1, Math.round(fit.dh*DPR));
-    const t = tint.getContext('2d');
-    t.drawImage(logoImg, fit.bx, fit.by, fit.bw, fit.bh, 0, 0, tint.width, tint.height);
-    t.globalCompositeOperation = 'source-in';
-    t.fillStyle = cssColor('--ink'); t.fillRect(0, 0, tint.width, tint.height);
+    const mk = (colorVar) => {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(fit.dw*DPR)); c.height = Math.max(1, Math.round(fit.dh*DPR));
+      const t = c.getContext('2d');
+      t.drawImage(logoImg, fit.bx, fit.by, fit.bw, fit.bh, 0, 0, c.width, c.height);
+      t.globalCompositeOperation = 'source-in';
+      t.fillStyle = cssColor(colorVar); t.fillRect(0, 0, c.width, c.height);
+      return c;
+    };
+    tint = mk('--ink');
+    tintSeal = mk('--seal');
   }
 
-  /* ── targets: sample the logo's interior on a grid (with erosion, like the
-     game splash) + neighbour edges for the connective tissue ── */
+  /* ── targets: slice the logo into a grid of TILES, one per particle.
+     Settled tiles butt together into the pixel-perfect logo; disturbed
+     tiles carry their patch of the letterforms away with them. ── */
+  let TILE = 6;   // cell size, css px (recomputed per layout)
   function buildTargets(){
     const bb = detectBBox(); if (!bb) return false;
     const S1 = Math.min(W*0.72/bb.bw, H*0.80/bb.bh);
     const dw = Math.round(bb.bw*S1), dh = Math.round(bb.bh*S1);
     fit = { dx: Math.round(cx-dw/2), dy: Math.round(cy-dh/2), dw, dh, ...bb };
     makeTint();
-    // css-px mask for sampling
+    // css-px mask for cell coverage
     mask = document.createElement('canvas'); mask.width = dw; mask.height = dh;
     const mc = mask.getContext('2d');
     mc.drawImage(logoImg, bb.bx, bb.by, bb.bw, bb.bh, 0, 0, dw, dh);
     const img = mc.getImageData(0, 0, dw, dh).data;
-    const op = (x,y) => (x>=0 && x<dw && y>=0 && y<dh) && img[(y*dw+x)*4+3] > 120;
-    const S = Math.max(3, Math.round(dh/34));            // grid pitch scales with logo size
-    const ER = Math.max(1, Math.round(dh*0.011));        // erosion radius → interior-only points
+    const S = Math.max(4, Math.round(dh/30));
+    TILE = S;
+    // one pass: does each cell contain any ink?
+    const gw = Math.ceil(dw/S), gh = Math.ceil(dh/S);
+    const has = new Uint8Array(gw*gh);
+    for (let y=0; y<dh; y++){ const gy = (y/S)|0;
+      for (let x=0; x<dw; x++){ if (img[(y*dw+x)*4+3] > 40) has[gy*gw + ((x/S)|0)] = 1; } }
     targets = [];
-    for (let y=0; y<dh; y+=S) for (let x=0; x<dw; x+=S){
-      if (!op(x,y)) continue;
-      if (op(x-ER,y)&&op(x+ER,y)&&op(x,y-ER)&&op(x,y+ER)&&op(x-ER,y-ER)&&op(x+ER,y+ER)&&op(x-ER,y+ER)&&op(x+ER,y-ER))
-        targets.push({ x: fit.dx+x, y: fit.dy+y });
-    }
     const gmap = new Map();
-    for (let i=0;i<targets.length;i++){ const t=targets[i]; gmap.set(((t.x-fit.dx)/S)+','+((t.y-fit.dy)/S), i); }
+    for (let gy=0; gy<gh; gy++) for (let gx=0; gx<gw; gx++){
+      if (!has[gy*gw+gx]) continue;
+      const x0 = gx*S, y0 = gy*S;
+      gmap.set(gx+','+gy, targets.length);
+      targets.push({ x: fit.dx + x0 + S/2, y: fit.dy + y0 + S/2, sx: x0, sy: y0, gx, gy });
+    }
     edges = [];
     for (let i=0;i<targets.length;i++){
-      const t=targets[i], gx=(t.x-fit.dx)/S, gy=(t.y-fit.dy)/S; let n;
-      n=gmap.get((gx+1)+','+gy);     if(n!==undefined) edges.push([i,n]);
-      n=gmap.get(gx+','+(gy+1));     if(n!==undefined) edges.push([i,n]);
-      n=gmap.get((gx+1)+','+(gy+1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
-      n=gmap.get((gx+1)+','+(gy-1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
+      const t=targets[i]; let n;
+      n=gmap.get((t.gx+1)+','+t.gy);     if(n!==undefined) edges.push([i,n]);
+      n=gmap.get(t.gx+','+(t.gy+1));     if(n!==undefined) edges.push([i,n]);
+      n=gmap.get((t.gx+1)+','+(t.gy+1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
+      n=gmap.get((t.gx+1)+','+(t.gy-1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
     }
     return true;
   }
@@ -112,11 +123,11 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     const sc = F/130;
     particles = targets.map(t => {
       const a = Math.random()*Math.PI*2, d = F*(0.40 + Math.random()*1.0);
-      // fast-flight accent: mostly ink, the odd seal / jade fleck
+      // fast-flight accent: mostly ink, the odd seal / jade fleck (streaks only)
       const roll = Math.random();
       const accent = roll > 0.92 ? sealC : roll > 0.86 ? jadeC : inkC;
       return {
-        tx:t.x, ty:t.y,
+        tx:t.x, ty:t.y, sx:t.sx, sy:t.sy,          // sx/sy = this tile's patch of the logo
         x: atTarget ? t.x : t.x + Math.cos(a)*d,
         y: atTarget ? t.y : t.y + Math.sin(a)*d,
         vx:0, vy:0,
@@ -196,16 +207,14 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     for (const p of particles) step(p, lock);
 
     ctx.clearRect(0,0,W,H);
-    const solid = clamp01((e-SOLID_AT)/SOLID_IN);
     const intro = clamp01(e/450);
-    const partA = 0.92*intro;
+    const partA = 0.92*intro + 0.08*clamp01((e-SOLID_AT)/SOLID_IN);
     const [IR,IG,IB] = inkC;
 
     // connective tissue while forming
-    const tissueA = intro*(1-solid)*0.28;
+    const tissueA = intro*(1-lock)*0.28;
     if (tissueA > 0.02 && edges.length){
-      const S = Math.max(3, Math.round((fit?fit.dh:130)/34));
-      const TH = S*3.4, TH2 = TH*TH;
+      const TH = TILE*3.4, TH2 = TH*TH;
       ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${IR},${IG},${IB},${tissueA})`;
       ctx.beginPath();
       for (let k=0;k<edges.length;k++){ const a=particles[edges[k][0]], b=particles[edges[k][1]];
@@ -213,25 +222,34 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
       ctx.stroke();
     }
 
-    // particles: little rotating squares, ink at rest, accent in flight
-    ctx.lineCap = 'round'; ctx.lineWidth = 2.0;
-    for (const p of particles){
-      const sp = Math.hypot(p.vx,p.vy), sf = clamp01(sp/(p.maxSpeed*0.85));
-      const mixSeal = Math.max(sf, bloom);       // CTA hover floods the swarm vermilion
-      const A = mixSeal >= sf && bloom > sf ? sealC : p.accent;
-      const r=(IR+(A[0]-IR)*mixSeal)|0, g=(IG+(A[1]-IG)*mixSeal)|0, b=(IB+(A[2]-IB)*mixSeal)|0;
-      ctx.fillStyle = `rgba(${r},${g},${b},${partA})`;
-      const HS = 1.2 + 1.7*sf;
-      if (sf<0.02 && p.rot>-0.012 && p.rot<0.012){ ctx.fillRect(p.x-1.2,p.y-1.2,2.4,2.4); }
-      else { ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.fillRect(-HS,-HS,HS*2,HS*2); ctx.restore(); }
-      if (sp>0.7){ ctx.strokeStyle = `rgba(${r},${g},${b},${0.7*partA})`;
-        ctx.beginPath(); ctx.moveTo(p.x-p.vx*1.4,p.y-p.vy*1.4); ctx.lineTo(p.x,p.y); ctx.stroke(); }
-    }
-
-    // the crisp logo resolves on top
-    if (solid>0 && tint){
-      ctx.globalAlpha = solid;
-      ctx.drawImage(tint, fit.dx, fit.dy, fit.dw, fit.dh);
+    /* each particle carries its own tile of the actual logo — settled tiles
+       reassemble the crisp mark exactly; disturbed tiles tear it apart */
+    if (tint){
+      const DPRt = tint.width / fit.dw;                 // css px → tint px
+      const Sw = TILE * DPRt, half = TILE/2;
+      ctx.globalAlpha = partA;
+      ctx.lineCap = 'round'; ctx.lineWidth = 2.0;
+      for (const p of particles){
+        const sp = Math.hypot(p.vx,p.vy), sf = clamp01(sp/(p.maxSpeed*0.85));
+        const still = sf<0.02 && p.rot>-0.012 && p.rot<0.012 && !p.loose;
+        if (still){
+          ctx.drawImage(tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
+          if (bloom > 0.02){ ctx.globalAlpha = partA*bloom;
+            ctx.drawImage(tintSeal, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
+            ctx.globalAlpha = partA; }
+        } else {
+          ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+          ctx.drawImage(tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, -half, -half, TILE, TILE);
+          ctx.restore();
+          // velocity streak, accent-tinted — the spot colour lives in the motion
+          if (sp>0.7){
+            const A = p.accent;
+            const r=(IR+(A[0]-IR)*sf)|0, g=(IG+(A[1]-IG)*sf)|0, b=(IB+(A[2]-IB)*sf)|0;
+            ctx.strokeStyle = `rgba(${r},${g},${b},${0.55*partA})`;
+            ctx.beginPath(); ctx.moveTo(p.x-p.vx*1.4,p.y-p.vy*1.4); ctx.lineTo(p.x,p.y); ctx.stroke();
+          }
+        }
+      }
       ctx.globalAlpha = 1;
     }
   }
