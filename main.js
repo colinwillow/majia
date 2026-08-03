@@ -131,7 +131,7 @@ const swarm = (() => {
     if (!slot) return null;
     const r = slot.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return null;
-    const src = (name === 'home' && logoReady) ? svgArt(r.width, r.height)
+    const src = (name === 'home' && logoReady) ? svgArt(r.width*0.8, r.height*0.8)
               : WORDS[name] ? textArt(WORDS[name], r.width, r.height) : null;
     if (!src) return null;
     const { art, dw, dh } = src;
