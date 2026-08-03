@@ -44,7 +44,7 @@ function trimClip(clip, eps = 2e-3){   // high enough to skip phantom end-keyfra
 }
 
 export async function initRobit({ canvas, theme, themeListeners, reduced }){
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, preserveDrawingBuffer:true });
   renderer.setPixelRatio(Math.min(2, devicePixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -91,6 +91,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   let mixer=null, model=null, pivot=null, framed=false, warm=0;
   let idleAction=null;
   let dropState = 'pending', dropV = 0;      // 'pending' → 'drop' → 'land' → 'idle'
+  let landT = 0, landDur = 1, landAction = null;
   const DROP_FROM = 3.1;
   const clips = {};
 
@@ -108,6 +109,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   idleAction = mixer.clipAction(clips['idle'] || gltf.animations[0]);
   idleAction.setLoop(THREE.LoopRepeat, Infinity); idleAction.play();
 
+  const fitState = { cx:0, cy:0, cz:0, dist:5 };
   function fitCamera(){
     const box = boneBox(); if (!box) return;
     const size = new THREE.Vector3(); box.getSize(size);
@@ -116,9 +118,35 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     const r = Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.3 + 0.12;
     const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
     const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.06;
-    // nudge the look-point up slightly so head + feet sit centred in the frame
-    const cy = center.y + size.y * 0.06;
-    cam.position.set(center.x, cy, center.z + dist); cam.lookAt(center.x, cy, center.z); cam.updateProjectionMatrix();
+    fitState.cx = center.x; fitState.cy = center.y + size.y * 0.06; fitState.cz = center.z; fitState.dist = dist;
+    applyFit();
+  }
+  function applyFit(){
+    cam.position.set(fitState.cx, fitState.cy, fitState.cz + fitState.dist);
+    cam.lookAt(fitState.cx, fitState.cy, fitState.cz); cam.updateProjectionMatrix();
+  }
+
+  // one-time optical centring: measure the rendered silhouette and nudge the
+  // camera so what the EYE sees is centred (bone boxes lie about visual mass)
+  let opticFix = 0;   // 0 = pending, 1 = scheduled window, 2 = done
+  let opticT = 0;
+  function opticCenter(){
+    try {
+      const src = renderer.domElement;
+      const w = 160, h = Math.max(2, Math.round(160 * src.height / src.width));
+      const c2 = document.createElement('canvas'); c2.width = w; c2.height = h;
+      const cc = c2.getContext('2d');
+      cc.drawImage(src, 0, 0, w, h);
+      const dd = cc.getImageData(0, 0, w, h).data;
+      let minX=w, maxX=0, found=false;
+      for (let y=0; y<h; y+=2) for (let x=0; x<w; x++)
+        if (dd[(y*w+x)*4+3] > 30){ if (x<minX) minX=x; if (x>maxX) maxX=x; found=true; }
+      if (!found) return;
+      const offN = ((minX+maxX)/2)/w - 0.5;               // silhouette centre vs frame centre
+      const viewW = 2*Math.tan(cam.fov*Math.PI/360)*fitState.dist*cam.aspect;
+      fitState.cx += offN * viewW;
+      applyFit();
+    } catch(_){}
   }
 
   function normalizeOnce(){
@@ -181,20 +209,28 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
         pivot.position.y = 0;
         const land = clips['landing'];
         if (land && mixer){
-          dropState = 'land';
-          const a = mixer.clipAction(land);
-          a.reset(); a.setLoop(THREE.LoopOnce); a.clampWhenFinished = false;
-          idleAction.crossFadeTo(a, 0.08, false); a.play();
-          const done = (ev) => { if (ev.action !== a) return;
-            mixer.removeEventListener('finished', done);
-            a.crossFadeTo(idleAction.reset().play(), 0.25, false);
-            dropState = 'idle'; };
-          mixer.addEventListener('finished', done);
+          dropState = 'land'; landT = 0;
+          landDur = Math.min(Math.max(land.duration, 0.3), 1.2);  // cap — never trust a baked-out timeline
+          landAction = mixer.clipAction(land);
+          landAction.reset(); landAction.setLoop(THREE.LoopOnce); landAction.clampWhenFinished = false;
+          idleAction.crossFadeTo(landAction, 0.08, false); landAction.play();
         } else dropState = 'idle';
+      }
+    }
+    else if (dropState === 'land'){
+      landT += dt;
+      if (landT >= landDur - 0.15){
+        landAction.crossFadeTo(idleAction.reset().play(), 0.25, false);
+        dropState = 'idle';
       }
     }
     bloom += (bloomTarget - bloom) * 0.1; setBloom();
     renderer.render(scene, cam);
+    // after he lands and settles, centre on the visible silhouette (once)
+    if (opticFix < 2 && framed && dropState === 'idle'){
+      opticT += dt;
+      if (opticT > 0.5){ opticCenter(); opticFix = 2; }
+    }
     requestAnimationFrame(loop);
   }
 
