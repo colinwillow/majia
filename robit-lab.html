@@ -65,7 +65,7 @@ const cam=new THREE.PerspectiveCamera(34,1,0.1,200);
 scene.add(new THREE.AmbientLight(0xffffff,0.06));
 const key=new THREE.DirectionalLight(0xffffff,1.5); key.position.set(2.5,4,4); scene.add(key);
 
-function trimClip(clip, eps=1e-4){
+function trimClip(clip, eps=2e-3){
   let start=Infinity,end=0;
   for(const tr of clip.tracks){ const t=tr.times,v=tr.values,st=v.length/t.length;
     for(let i=1;i<t.length;i++){ let d=0; for(let k=0;k<st;k++) d=Math.max(d,Math.abs(v[i*st+k]-v[(i-1)*st+k]));
