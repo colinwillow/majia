@@ -72,10 +72,14 @@ function trimClip(clip, eps=2e-3){
       if(d>eps){ if(t[i-1]<start)start=t[i-1]; if(t[i]>end)end=t[i]; } } }
   if(!isFinite(start)||end<=start) return;
   const pad=1/60; start=Math.max(0,start-pad); end+=pad;
+  const dur=end-start;
   for(const tr of clip.tracks){ const t=tr.times,v=tr.values,st=v.length/t.length,nt=[],nv=[];
     for(let i=0;i<t.length;i++){ if(t[i]<start-1e-6||t[i]>end+1e-6)continue; nt.push(t[i]-start); for(let k=0;k<st;k++) nv.push(v[i*st+k]); }
-    if(nt.length>=2){ tr.times=new Float32Array(nt); tr.values=new Float32Array(nv); } }
-  clip.duration=end-start; clip.resetDuration();
+    if(nt.length>=2){ tr.times=new Float32Array(nt); tr.values=new Float32Array(nv); }
+    else { let j=0; for(let i=0;i<t.length;i++){ if(t[i]<=start+1e-6)j=i; else break; }
+      const cv=[]; for(let k=0;k<st;k++) cv.push(v[j*st+k]);
+      tr.times=new Float32Array([0,dur]); tr.values=new Float32Array([...cv,...cv]); } }
+  clip.duration=dur; clip.resetDuration();
 }
 
 const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim()||getComputedStyle(document.body).getPropertyValue(n).trim();
