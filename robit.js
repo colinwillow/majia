@@ -29,6 +29,7 @@ function trimClip(clip, eps = 2e-3){   // high enough to skip phantom end-keyfra
   if (!isFinite(start) || end <= start) return;         // static or already tight
   const pad = 1/60;
   start = Math.max(0, start - pad); end = end + pad;
+  const dur = end - start;
   for (const tr of clip.tracks){
     const t = tr.times, v = tr.values, stride = v.length / t.length;
     const nt = [], nv = [];
@@ -38,8 +39,19 @@ function trimClip(clip, eps = 2e-3){   // high enough to skip phantom end-keyfra
       for (let k = 0; k < stride; k++) nv.push(v[i*stride+k]);
     }
     if (nt.length >= 2){ tr.times = new Float32Array(nt); tr.values = new Float32Array(nv); }
+    else {
+      // constant track (optimizer left keyframes only at 0 and the baked 18.5s end):
+      // rebuild as a clean 2-keyframe constant over the trimmed window — otherwise
+      // its stale end-time survives and resetDuration() stretches the clip back out
+      let j = 0;
+      for (let i = 0; i < t.length; i++){ if (t[i] <= start + 1e-6) j = i; else break; }
+      const cv = [];
+      for (let k = 0; k < stride; k++) cv.push(v[j*stride+k]);
+      tr.times = new Float32Array([0, dur]);
+      tr.values = new Float32Array([...cv, ...cv]);
+    }
   }
-  clip.duration = end - start;
+  clip.duration = dur;
   clip.resetDuration();
 }
 
