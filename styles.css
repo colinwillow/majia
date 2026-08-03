@@ -122,10 +122,18 @@ body::before {
 .t-fx:nth-child(3){transition-delay:.16s}.t-fx:nth-child(4){transition-delay:.22s}
 .t-fx:nth-child(5){transition-delay:.28s}.t-fx:nth-child(6){transition-delay:.34s}
 
-/* ------------------------------------------------------------ home: boids logo */
-.logo-canvas {
-  display: block; width: min(720px, 90vw); height: min(300px, 34vh); pointer-events: none;
+/* ------------------------------------------------------------ the tile swarm */
+.swarm-canvas {
+  position: fixed; inset: 0; z-index: 12;
+  width: 100vw; height: 100dvh;
+  pointer-events: none;
 }
+
+/* empty layout boxes the swarm forms its mark inside */
+.word-slot { position: relative; }
+.word-slot--hero  { width: min(720px, 90vw); height: min(300px, 30vh); }
+.word-slot--title { width: 100%; height: clamp(3rem, 9vw, 5rem); }
+
 .hero { position: relative; margin-top: 0.5rem; }
 .hero__sub {
   font-size: clamp(0.8rem, 2vw, 1rem); letter-spacing: 1.1em; text-indent: 1.1em;
@@ -204,25 +212,15 @@ body::before {
 }
 .signal-line:hover { color: var(--seal); }
 
-/* ------------------------------------------------------------ shoji transition */
-.shoji { position: fixed; inset: 0; z-index: 15; pointer-events: none; overflow: hidden; }
-.shoji__panel {
-  position: absolute; top: 0; bottom: 0; width: 50.5%;
-  background-color: var(--paper-2);
-  background-image:
-    repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 90px),
-    repeating-linear-gradient(0deg,  var(--line) 0 1px, transparent 1px 120px);
-  transition: transform 0.55s var(--ease-shoji);
-}
-.shoji__panel--l { left: 0; transform: translateX(-102%); border-right: 2px solid var(--line); box-shadow: 14px 0 30px rgba(0,0,0,0.08); }
-.shoji__panel--r { right: 0; transform: translateX(102%); border-left: 2px solid var(--line); box-shadow: -14px 0 30px rgba(0,0,0,0.08); }
-.shoji.is-closed .shoji__panel--l, .shoji.is-closed .shoji__panel--r { transform: translateX(0); }
-
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 820px) {
-  .robits-layout { flex-direction: column; gap: 1.5rem; }
+  .robits-layout { flex-direction: column; gap: 0.6rem; }
+  .robit-stage { width: 100%; display: flex; justify-content: center; }
+  .robit-canvas { width: min(340px, 82vw); height: min(340px, 38vh); margin: 0 auto; }
   .panel--robits { text-align: center; }
   .panel--robits .panel__eyebrow, .panel--robits .panel__actions { justify-content: center; }
+  /* tall content scrolls; the swarm re-glues its mark on scroll */
+  #screen-robits.is-active { justify-content: flex-start; overflow-y: auto; padding-bottom: 5rem; }
 }
 @media (max-width: 640px) {
   .chrome { padding: 1.2rem 1.2rem; }

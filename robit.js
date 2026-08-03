@@ -17,7 +17,7 @@ function hexToColor(hex){ return new THREE.Color(hex || '#000'); }
 // Trim baked dead frames: find the window where any track actually moves and
 // rebuild every track to that window (times rebased to 0), so clips are their
 // true length and loop cleanly. No-op for clips that move across the whole span.
-function trimClip(clip, eps = 1e-4){
+function trimClip(clip, eps = 2e-3){   // high enough to skip phantom end-keyframes (idle had one at 18.5s)
   let start = Infinity, end = 0;
   for (const tr of clip.tracks){
     const t = tr.times, v = tr.values, stride = v.length / t.length;
@@ -90,6 +90,8 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
 
   let mixer=null, model=null, pivot=null, framed=false, warm=0;
   let idleAction=null;
+  let dropState = 'pending', dropV = 0;      // 'pending' → 'drop' → 'land' → 'idle'
+  const DROP_FROM = 3.1;
   const clips = {};
 
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -99,6 +101,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   model.traverse(o => { if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) if (!bones.includes(b)) bones.push(b); });
   pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
   pivot.rotation.y = FACE;
+  pivot.visible = false;                     // hidden until framed, then he drops in
   mixer = new THREE.AnimationMixer(model);
   // the game GLB bakes every clip onto one long timeline; trim each to its real motion
   for (const c of gltf.animations){ trimClip(c); clips[c.name] = c; }
@@ -110,9 +113,9 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
     // bones under-cover the surface; pad, but tighter now so he reads bigger
-    const r = Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.15 + 0.1;
+    const r = Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.3 + 0.12;
     const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
-    const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.0;
+    const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.06;
     // nudge the look-point up slightly so head + feet sit centred in the frame
     const cy = center.y + size.y * 0.06;
     cam.position.set(center.x, cy, center.z + dist); cam.lookAt(center.x, cy, center.z); cam.updateProjectionMatrix();
@@ -125,6 +128,11 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     model.scale.multiplyScalar(s);
     for (const u of outlineU) u.value = OUT_T / s;
     model.updateWorldMatrix(true, true);
+    // the GLB root is offset — recentre so the pivot spins/frames about the body
+    const bb = boneBox();
+    if (bb){ const c = new THREE.Vector3(); bb.getCenter(c);
+      model.position.x -= c.x; model.position.z -= c.z;
+      model.updateWorldMatrix(true, true); }
   }
 
   // theme: outline follows ink colour
@@ -153,13 +161,38 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
 
   const clock = new THREE.Clock();
   let active = false, running = false;
+  function startDrop(){
+    dropState = 'drop'; dropV = 0;
+    pivot.position.y = DROP_FROM; pivot.visible = true;
+    idleAction.reset().play();
+  }
+
   function loop(){
     if (!active){ running = false; return; }
     running = true;
-    const dt = clock.getDelta();
+    const dt = Math.min(clock.getDelta(), 0.05);
     if (mixer) mixer.update(dt);
-    if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); framed = true; }
-    // no auto-orbit — he holds a fixed facing like a 2D character
+    if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); framed = true; startDrop(); }
+    // assemble: he falls in from above, lands, then settles into idle
+    if (dropState === 'drop'){
+      dropV += 14 * dt;
+      pivot.position.y -= dropV * dt * 4.2;
+      if (pivot.position.y <= 0){
+        pivot.position.y = 0;
+        const land = clips['landing'];
+        if (land && mixer){
+          dropState = 'land';
+          const a = mixer.clipAction(land);
+          a.reset(); a.setLoop(THREE.LoopOnce); a.clampWhenFinished = false;
+          idleAction.crossFadeTo(a, 0.08, false); a.play();
+          const done = (ev) => { if (ev.action !== a) return;
+            mixer.removeEventListener('finished', done);
+            a.crossFadeTo(idleAction.reset().play(), 0.25, false);
+            dropState = 'idle'; };
+          mixer.addEventListener('finished', done);
+        } else dropState = 'idle';
+      }
+    }
     bloom += (bloomTarget - bloom) * 0.1; setBloom();
     renderer.render(scene, cam);
     requestAnimationFrame(loop);
@@ -168,8 +201,13 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   return {
     setActive(on){
       active = on;
-      if (on){ clock.getDelta(); if (!resize()) framed = false; if (!running && !reduced) requestAnimationFrame(loop);
-               if (reduced){ resize(); if(!framed && boneBox()){ normalizeOnce(); fitCamera(); framed = true; } setBloom(); renderer.render(scene, cam); } }
+      if (on){
+        clock.getDelta(); if (!resize()) framed = false;
+        if (framed && !reduced) startDrop();           // re-assemble on every visit
+        if (!running && !reduced) requestAnimationFrame(loop);
+        if (reduced){ resize(); if(!framed && boneBox()){ normalizeOnce(); fitCamera(); framed = true; }
+          pivot.visible = true; pivot.position.y = 0; setBloom(); renderer.render(scene, cam); }
+      }
     }
   };
 }

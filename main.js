@@ -1,8 +1,9 @@
 /* ============================================================
    MAJIA STUDIO — app
-   Splash-style wordmark: the game's boot-splash particle system
-   (halo spawn → underdamped springs → timed lock → solid logo)
-   retargeted onto the real MAJIA svg, in paper & ink.
+   One tile-swarm writes every screen's mark: the SVG logo on
+   home, the serif titles elsewhere. Settled tiles ARE the crisp
+   mark; navigation deconstructs it and reassembles the next.
+   Mobile-first: swipe left/right moves between screens.
    ============================================================ */
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -24,22 +25,26 @@ document.getElementById('themeFlip').addEventListener('click', () => applyTheme(
 
 function cssColor(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || '#000'; }
 
-/* ---------- splash wordmark ------------------------------------------ */
-(() => {
+const ORDER = ['home','robits','studio','signal'];
+const WORDS = { robits:'ROBITS', studio:'STUDIO', signal:'SIGNAL' };
+
+/* ---------- the tile swarm ------------------------------------------- */
+const swarm = (() => {
   const canvas = document.getElementById('logo');
   const ctx = canvas.getContext('2d');
   const clamp01 = t => t < 0 ? 0 : t > 1 ? 1 : t;
 
-  let W = 0, H = 0, DPR = 1, cx = 0, cy = 0;
-  let targets = [], particles = [], edges = [];
-  let fit = null, tint = null, tintSeal = null, mask = null;   // real logo, theme-tinted
+  let W = 0, H = 0, DPR = 1;
+  let particles = [], fading = [];
+  let mark = null;                       // { dx,dy,dw,dh,tile,art,tint,tintSeal,targets,edges }
+  let markName = null;
   let logoReady = false;
   const logoImg = new Image();
-  let spawned = false, t0 = 0, locked = false;
+  let spawned = false, t0 = 0, introDone = false;
   const mouse = { x: -1e4, y: -1e4, active: false };
   let bloom = 0, bloomTarget = 0;
+  let retryTimer = 0;
 
-  // theme colours as [r,g,b]
   let inkC = [28,26,22], sealC = [194,69,47], jadeC = [93,125,107];
   function toRGB(hex){ const probe = document.createElement('canvas').getContext('2d');
     probe.fillStyle = hex; const m = probe.fillStyle;
@@ -47,99 +52,177 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     const p = m.match(/\d+/g); return p ? p.slice(0,3).map(Number) : [0,0,0]; }
   function readColors(){ inkC = toRGB(cssColor('--ink')); sealC = toRGB(cssColor('--seal')); jadeC = toRGB(cssColor('--jade')); }
   readColors();
-  themeListeners.add(() => { readColors(); if (fit) makeTint(); if (reduced) drawStatic(); });
+  themeListeners.add(() => { readColors(); if (mark) tintMark(mark); if (reduced) drawStatic(); });
 
-  /* ── the real logo: fit its ink bbox to the canvas ── */
-  function detectBBox(){
-    const iw = logoImg.naturalWidth || 1004, ih = logoImg.naturalHeight || 1010;
-    const det = document.createElement('canvas'); det.width = iw; det.height = ih;
-    const dc = det.getContext('2d'); dc.drawImage(logoImg, 0, 0, iw, ih);
-    const dd = dc.getImageData(0, 0, iw, ih).data;
-    let minX=iw, minY=ih, maxX=0, maxY=0, found=false;
-    for (let y=0;y<ih;y+=2) for (let x=0;x<iw;x+=2){ if (dd[(y*iw+x)*4+3] > 60){
+  function resize(){
+    W = innerWidth; H = innerHeight;
+    DPR = Math.min(2, devicePixelRatio||1);
+    canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  resize();
+
+  /* ── build the "art" (black shapes) for a screen's mark ──
+     The SVG has a viewBox but no width/height (naturalWidth ≈ 149px), and
+     source-rect drawImage straight from an SVG image is unreliable. So:
+     rasterize the vector ONCE onto a big master canvas (SVGs scale crisply
+     to any destination), then crop canvas→canvas, which is dependable. */
+  let master = null, masterBox = null;
+  function ensureMaster(){
+    if (master) return true;
+    const iw = logoImg.naturalWidth || 300, ih = logoImg.naturalHeight || 150;
+    const MW = 2048, MH = Math.max(2, Math.round(MW*ih/iw));
+    const c = document.createElement('canvas'); c.width = MW; c.height = MH;
+    c.getContext('2d').drawImage(logoImg, 0, 0, MW, MH);
+    const dd = c.getContext('2d').getImageData(0, 0, MW, MH).data;
+    let minX=MW, minY=MH, maxX=0, maxY=0, found=false;
+    for (let y=0;y<MH;y+=2) for (let x=0;x<MW;x+=2){ if (dd[(y*MW+x)*4+3] > 60){
       if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; found=true; } }
-    return found ? { bx:minX, by:minY, bw:maxX-minX, bh:maxY-minY } : null;
+    if (!found) return false;
+    master = c; masterBox = { minX, minY, bw: maxX-minX, bh: maxY-minY };
+    return true;
+  }
+  function svgArt(maxW, maxH){
+    if (!ensureMaster()) return null;
+    const { minX, minY, bw, bh } = masterBox;
+    const S = Math.min(maxW/bw, maxH/bh);
+    const dw = Math.max(2, Math.round(bw*S)), dh = Math.max(2, Math.round(bh*S));
+    const art = document.createElement('canvas'); art.width = Math.round(dw*DPR); art.height = Math.round(dh*DPR);
+    art.getContext('2d').drawImage(master, minX, minY, bw, bh, 0, 0, art.width, art.height);
+    return { art, dw, dh };
   }
 
-  function makeTint(){
-    if (!fit) return;
+  function textArt(word, maxW, maxH){
+    const probe = document.createElement('canvas').getContext('2d');
+    const setFont = (c, px) => { c.font = `500 ${px}px "Playfair Display", Georgia, serif`;
+      if ('letterSpacing' in c) c.letterSpacing = (px*0.08)+'px'; };
+    setFont(probe, 100);
+    const w100 = Math.max(1, probe.measureText(word).width);
+    const px = Math.min(maxH*0.94, maxW/w100*100);
+    const dw = Math.max(2, Math.ceil(w100*px/100) + 4), dh = Math.max(2, Math.ceil(px*1.06));
+    const art = document.createElement('canvas'); art.width = Math.round(dw*DPR); art.height = Math.round(dh*DPR);
+    const a = art.getContext('2d');
+    a.scale(DPR, DPR); setFont(a, px);
+    a.fillStyle = '#000'; a.textAlign = 'center'; a.textBaseline = 'middle';
+    a.fillText(word, dw/2, dh*0.54);
+    return { art, dw, dh };
+  }
+
+  function tintMark(m){
     const mk = (colorVar) => {
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(fit.dw*DPR)); c.height = Math.max(1, Math.round(fit.dh*DPR));
+      const c = document.createElement('canvas'); c.width = m.art.width; c.height = m.art.height;
       const t = c.getContext('2d');
-      t.drawImage(logoImg, fit.bx, fit.by, fit.bw, fit.bh, 0, 0, c.width, c.height);
+      t.drawImage(m.art, 0, 0);
       t.globalCompositeOperation = 'source-in';
-      t.fillStyle = cssColor(colorVar); t.fillRect(0, 0, c.width, c.height);
+      t.fillStyle = cssColor(colorVar); t.fillRect(0,0,c.width,c.height);
       return c;
     };
-    tint = mk('--ink');
-    tintSeal = mk('--seal');
+    m.tint = mk('--ink'); m.tintSeal = mk('--seal');
   }
 
-  /* ── targets: slice the logo into a grid of TILES, one per particle.
-     Settled tiles butt together into the pixel-perfect logo; disturbed
-     tiles carry their patch of the letterforms away with them. ── */
-  let TILE = 6;   // cell size, css px (recomputed per layout)
-  function buildTargets(){
-    const bb = detectBBox(); if (!bb) return false;
-    const S1 = Math.min(W*0.72/bb.bw, H*0.80/bb.bh);
-    const dw = Math.round(bb.bw*S1), dh = Math.round(bb.bh*S1);
-    fit = { dx: Math.round(cx-dw/2), dy: Math.round(cy-dh/2), dw, dh, ...bb };
-    makeTint();
-    // css-px mask for cell coverage
-    mask = document.createElement('canvas'); mask.width = dw; mask.height = dh;
-    const mc = mask.getContext('2d');
-    mc.drawImage(logoImg, bb.bx, bb.by, bb.bw, bb.bh, 0, 0, dw, dh);
-    const img = mc.getImageData(0, 0, dw, dh).data;
-    const S = Math.max(4, Math.round(dh/30));
-    TILE = S;
-    // one pass: does each cell contain any ink?
-    const gw = Math.ceil(dw/S), gh = Math.ceil(dh/S);
+  /* ── slice a mark into tile targets ── */
+  function buildMark(name){
+    const slot = document.querySelector(`[data-screen="${name}"] .word-slot`);
+    if (!slot) return null;
+    const r = slot.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return null;
+    const src = (name === 'home' && logoReady) ? svgArt(r.width, r.height)
+              : WORDS[name] ? textArt(WORDS[name], r.width, r.height) : null;
+    if (!src) return null;
+    const { art, dw, dh } = src;
+    // alignment follows the slot's computed text-align (left on desktop robits, centred elsewhere)
+    const ta = getComputedStyle(slot).textAlign;
+    const dx = Math.round(ta === 'left' || ta === 'start' ? r.left : r.left + (r.width - dw)/2);
+    const dy = Math.round(r.top + (r.height - dh)/2);
+    const m = { dx, dy, dw, dh, art, tile: Math.max(4, Math.round(dh/30)), targets: [], edges: [] };
+    tintMark(m);
+    // cell coverage from a css-res mask
+    const mask = document.createElement('canvas'); mask.width = dw; mask.height = dh;
+    const mc = mask.getContext('2d'); mc.drawImage(art, 0, 0, dw, dh);
+    const img = mc.getImageData(0,0,dw,dh).data;
+    const S = m.tile, gw = Math.ceil(dw/S), gh = Math.ceil(dh/S);
     const has = new Uint8Array(gw*gh);
-    for (let y=0; y<dh; y++){ const gy = (y/S)|0;
-      for (let x=0; x<dw; x++){ if (img[(y*dw+x)*4+3] > 40) has[gy*gw + ((x/S)|0)] = 1; } }
-    targets = [];
+    for (let y=0; y<dh; y++){ const gy=(y/S)|0;
+      for (let x=0; x<dw; x++){ if (img[(y*dw+x)*4+3] > 40) has[gy*gw+((x/S)|0)] = 1; } }
     const gmap = new Map();
     for (let gy=0; gy<gh; gy++) for (let gx=0; gx<gw; gx++){
       if (!has[gy*gw+gx]) continue;
-      const x0 = gx*S, y0 = gy*S;
-      gmap.set(gx+','+gy, targets.length);
-      targets.push({ x: fit.dx + x0 + S/2, y: fit.dy + y0 + S/2, sx: x0, sy: y0, gx, gy });
+      gmap.set(gx+','+gy, m.targets.length);
+      m.targets.push({ x: dx + gx*S + S/2, y: dy + gy*S + S/2, sx: gx*S, sy: gy*S, gx, gy });
     }
-    edges = [];
-    for (let i=0;i<targets.length;i++){
-      const t=targets[i]; let n;
-      n=gmap.get((t.gx+1)+','+t.gy);     if(n!==undefined) edges.push([i,n]);
-      n=gmap.get(t.gx+','+(t.gy+1));     if(n!==undefined) edges.push([i,n]);
-      n=gmap.get((t.gx+1)+','+(t.gy+1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
-      n=gmap.get((t.gx+1)+','+(t.gy-1)); if(n!==undefined&&Math.random()<0.5) edges.push([i,n]);
+    for (let i=0;i<m.targets.length;i++){
+      const t=m.targets[i]; let n;
+      n=gmap.get((t.gx+1)+','+t.gy);     if(n!==undefined) m.edges.push([i,n]);
+      n=gmap.get(t.gx+','+(t.gy+1));     if(n!==undefined) m.edges.push([i,n]);
+      n=gmap.get((t.gx+1)+','+(t.gy+1)); if(n!==undefined&&Math.random()<0.5) m.edges.push([i,n]);
+      n=gmap.get((t.gx+1)+','+(t.gy-1)); if(n!==undefined&&Math.random()<0.5) m.edges.push([i,n]);
     }
-    return true;
+    return m;
   }
 
-  /* ── particles: spawn in a halo around the word; underdamped springs ── */
-  function initParticles(atTarget){
-    const F = fit ? fit.dh : 130;
-    const sc = F/130;
-    particles = targets.map(t => {
-      const a = Math.random()*Math.PI*2, d = F*(0.40 + Math.random()*1.0);
-      // fast-flight accent: mostly ink, the odd seal / jade fleck (streaks only)
-      const roll = Math.random();
-      const accent = roll > 0.92 ? sealC : roll > 0.86 ? jadeC : inkC;
-      return {
-        tx:t.x, ty:t.y, sx:t.sx, sy:t.sy,          // sx/sy = this tile's patch of the logo
-        x: atTarget ? t.x : t.x + Math.cos(a)*d,
-        y: atTarget ? t.y : t.y + Math.sin(a)*d,
-        vx:0, vy:0,
-        maxSpeed:(9.0 + Math.random()*10.0)*sc,
-        k:0.018 + Math.random()*0.045,             // spring stiffness — varied arrival timing
-        damp:0.86 + Math.random()*0.075,           // underdamped → rubbery overshoot + wobble
-        accent,
-        rot:(Math.random()-0.5)*4.0, rotV:(Math.random()-0.5)*0.6, trot:0,
-      };
-    });
+  function newParticle(t, F, atTarget){
+    const a = Math.random()*Math.PI*2, d = F*(0.40 + Math.random()*1.0);
+    const roll = Math.random();
+    return {
+      tx:t.x, ty:t.y, sx:t.sx, sy:t.sy,
+      x: atTarget ? t.x : t.x + Math.cos(a)*d,
+      y: atTarget ? t.y : t.y + Math.sin(a)*d,
+      vx:0, vy:0,
+      maxSpeed:(9.0 + Math.random()*10.0)*(F/130),
+      k:0.018 + Math.random()*0.045,
+      damp:0.86 + Math.random()*0.075,
+      accent: roll > 0.92 ? sealC : roll > 0.86 ? jadeC : inkC,
+      rot:(Math.random()-0.5)*4.0, rotV:(Math.random()-0.5)*0.6, trot:0,
+      loose:false,
+    };
   }
 
+  /* retarget the swarm onto a (new) mark — reuse bodies, spawn/retire the rest */
+  function applyMark(m, name, { instant = false } = {}){
+    mark = m; markName = name;
+    const F = m.dh;
+    const n = m.targets.length;
+    // surplus chips fly off and dissolve
+    for (let i=n; i<particles.length; i++){
+      const p = particles[i];
+      const a = Math.random()*Math.PI*2;
+      p.vx += Math.cos(a)*6; p.vy += Math.sin(a)*6; p.life = 1;
+      fading.push(p);
+    }
+    particles.length = Math.min(particles.length, n);
+    for (let i=0; i<n; i++){
+      const t = m.targets[i];
+      if (particles[i]){
+        const p = particles[i];
+        p.tx=t.x; p.ty=t.y; p.sx=t.sx; p.sy=t.sy;
+        p.maxSpeed = (9.0 + Math.random()*10.0)*(F/130);
+        if (instant){ p.x=t.x; p.y=t.y; p.vx=p.vy=0; p.rot=0; p.rotV=0; p.loose=false; }
+        else { p.loose = true; p.rotV += (Math.random()-0.5)*0.5; }
+      } else {
+        particles.push(newParticle(t, F, instant));
+        if (!instant) particles[i].loose = true;
+      }
+    }
+  }
+
+  /* point the swarm at a screen; retries until its slot has layout */
+  function settle(name, opts = {}){
+    clearTimeout(retryTimer);
+    const m = buildMark(name);
+    if (!m){ retryTimer = setTimeout(() => settle(name, opts), 60); return; }
+    const first = !spawned;
+    applyMark(m, name, { instant: reduced || opts.instant });
+    if (first){ spawned = true; t0 = performance.now(); }
+    if (reduced) drawStatic();
+  }
+
+  addEventListener('pointermove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; });
+  addEventListener('pointerleave', () => mouse.active = false);
+
+  const cta = document.querySelector('[data-morph]');
+  if (cta){ cta.addEventListener('pointerenter', () => bloomTarget = 1); cta.addEventListener('pointerleave', () => bloomTarget = 0); }
+
+  /* ── physics (the game splash springs) ── */
   function step(p, lock){
     if (lock >= 1 && !p.loose){ p.x=p.tx; p.y=p.ty; p.vx=0; p.vy=0; p.rot=p.trot; p.rotV=0; return; }
     const dx=p.tx-p.x, dy=p.ty-p.y;
@@ -151,51 +234,20 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     if (lock>0 && !p.loose){ const sm=lock*lock*(3-2*lock);
       p.x+=(p.tx-p.x)*sm*0.4; p.y+=(p.ty-p.y)*sm*0.4; p.vx*=(1-sm); p.vy*=(1-sm);
       p.rot+=(p.trot-p.rot)*sm*0.4; p.rotV*=(1-sm); }
-    // a disturbed particle goes back to sleep once it's home again
-    if (p.loose && Math.abs(dx)<0.4 && Math.abs(dy)<0.4 && sp<0.15){ p.loose=false; p.x=p.tx; p.y=p.ty; p.vx=p.vy=0; }
+    if (p.loose && Math.abs(dx)<0.4 && Math.abs(dy)<0.4 && sp<0.15){ p.loose=false; p.x=p.tx; p.y=p.ty; p.vx=p.vy=0; p.rot=0; p.rotV=0; }
   }
 
-  /* ── layout / boot ── */
-  function build(){
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    W = rect.width; H = rect.height;
-    DPR = Math.min(2, devicePixelRatio||1);
-    canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-    cx = W/2; cy = H/2;
-    if (!logoReady) return;
-    if (!buildTargets()) return;
-    if (!spawned){ initParticles(false); spawned = true; t0 = performance.now(); }
-    else initParticles(true);                    // resize after intro → sit on targets
-    if (reduced) drawStatic();
-  }
-
-  addEventListener('pointermove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top; mouse.active = true;
-  });
-  addEventListener('pointerleave', () => mouse.active = false);
-
-  const cta = document.querySelector('[data-morph]');
-  if (cta){ cta.addEventListener('pointerenter', () => bloomTarget = 1); cta.addEventListener('pointerleave', () => bloomTarget = 0); }
-
-  /* ── the splash timeline (same beats as the game) ── */
-  const LOCK_START = 1050, FREEZE_AT = 1600, SOLID_AT = 1750, SOLID_IN = 400;
+  const LOCK_START = 1050, FREEZE_AT = 1600;
 
   function draw(now){
     requestAnimationFrame(draw);
-    if (!spawned || reduced) return;
-    const homeVis = document.getElementById('screen-home').classList.contains('is-active');
-    if (!homeVis) return;
+    if (!spawned || reduced || !mark) return;
     bloom += (bloomTarget - bloom) * 0.08;
-
     const e = now - t0;
-    const lock = clamp01((e-LOCK_START)/(FREEZE_AT-LOCK_START));
-    if (lock >= 1) locked = true;
+    const lock = introDone ? 1 : clamp01((e-LOCK_START)/(FREEZE_AT-LOCK_START));
+    if (lock >= 1) introDone = true;
 
-    // pointer disturbs settled particles; springs pull them home with a wobble
-    if (locked && mouse.active){
+    if (introDone && mouse.active){
       const R = 46, R2 = R*R;
       for (const p of particles){
         const mx = p.x-mouse.x, my = p.y-mouse.y, d2 = mx*mx+my*my;
@@ -208,68 +260,93 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
 
     ctx.clearRect(0,0,W,H);
     const intro = clamp01(e/450);
-    const partA = 0.92*intro + 0.08*clamp01((e-SOLID_AT)/SOLID_IN);
+    const partA = introDone ? 1 : 0.92*intro;
     const [IR,IG,IB] = inkC;
+    const TILE = mark.tile;
 
-    // connective tissue while forming
-    const tissueA = intro*(1-lock)*0.28;
-    if (tissueA > 0.02 && edges.length){
+    // connective tissue during the boot splash only
+    const tissueA = introDone ? 0 : intro*(1-lock)*0.28;
+    if (tissueA > 0.02 && mark.edges.length){
       const TH = TILE*3.4, TH2 = TH*TH;
       ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${IR},${IG},${IB},${tissueA})`;
       ctx.beginPath();
-      for (let k=0;k<edges.length;k++){ const a=particles[edges[k][0]], b=particles[edges[k][1]];
+      for (let k=0;k<mark.edges.length;k++){
+        const a=particles[mark.edges[k][0]], b=particles[mark.edges[k][1]];
+        if (!a||!b) continue;
         const dx=a.x-b.x, dy=a.y-b.y; if (dx*dx+dy*dy<TH2){ ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); } }
       ctx.stroke();
     }
 
-    /* each particle carries its own tile of the actual logo — settled tiles
-       reassemble the crisp mark exactly; disturbed tiles tear it apart */
-    if (tint){
-      const DPRt = tint.width / fit.dw;                 // css px → tint px
-      const Sw = TILE * DPRt, half = TILE/2;
-      ctx.globalAlpha = partA;
-      ctx.lineCap = 'round'; ctx.lineWidth = 2.0;
-      for (const p of particles){
-        const sp = Math.hypot(p.vx,p.vy), sf = clamp01(sp/(p.maxSpeed*0.85));
-        const still = sf<0.02 && p.rot>-0.012 && p.rot<0.012 && !p.loose;
-        if (still){
-          ctx.drawImage(tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
-          if (bloom > 0.02){ ctx.globalAlpha = partA*bloom;
-            ctx.drawImage(tintSeal, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
-            ctx.globalAlpha = partA; }
-        } else {
-          ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
-          ctx.drawImage(tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, -half, -half, TILE, TILE);
-          ctx.restore();
-          // velocity streak, accent-tinted — the spot colour lives in the motion
-          if (sp>0.7){
-            const A = p.accent;
-            const r=(IR+(A[0]-IR)*sf)|0, g=(IG+(A[1]-IG)*sf)|0, b=(IB+(A[2]-IB)*sf)|0;
-            ctx.strokeStyle = `rgba(${r},${g},${b},${0.55*partA})`;
-            ctx.beginPath(); ctx.moveTo(p.x-p.vx*1.4,p.y-p.vy*1.4); ctx.lineTo(p.x,p.y); ctx.stroke();
-          }
+    // retiring chips dissolve
+    for (let i=fading.length-1; i>=0; i--){
+      const p = fading[i];
+      p.life -= 0.04; if (p.life <= 0){ fading.splice(i,1); continue; }
+      p.x += p.vx; p.y += p.vy; p.vx *= 0.94; p.vy *= 0.94; p.rot += p.rotV;
+      ctx.fillStyle = `rgba(${IR},${IG},${IB},${(0.7*p.life).toFixed(3)})`;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.fillRect(-2,-2,4,4); ctx.restore();
+    }
+
+    // tiles: settled = the crisp mark; loose = chips of it in flight
+    const DPRt = mark.tint.width / mark.dw;
+    const Sw = TILE * DPRt, half = TILE/2;
+    ctx.globalAlpha = partA;
+    ctx.lineCap = 'round'; ctx.lineWidth = 2.0;
+    for (const p of particles){
+      const sp = Math.hypot(p.vx,p.vy), sf = clamp01(sp/(p.maxSpeed*0.85));
+      const still = sf<0.02 && p.rot>-0.012 && p.rot<0.012 && !p.loose;
+      if (still){
+        ctx.drawImage(mark.tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
+        if (bloom > 0.02){ ctx.globalAlpha = partA*bloom;
+          ctx.drawImage(mark.tintSeal, p.sx*DPRt, p.sy*DPRt, Sw, Sw, p.tx-half, p.ty-half, TILE, TILE);
+          ctx.globalAlpha = partA; }
+      } else {
+        ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+        ctx.drawImage(mark.tint, p.sx*DPRt, p.sy*DPRt, Sw, Sw, -half, -half, TILE, TILE);
+        ctx.restore();
+        if (sp>0.7){
+          const A = p.accent;
+          const r=(IR+(A[0]-IR)*sf)|0, g=(IG+(A[1]-IG)*sf)|0, b=(IB+(A[2]-IB)*sf)|0;
+          ctx.strokeStyle = `rgba(${r},${g},${b},${0.55*partA})`;
+          ctx.beginPath(); ctx.moveTo(p.x-p.vx*1.4,p.y-p.vy*1.4); ctx.lineTo(p.x,p.y); ctx.stroke();
         }
       }
-      ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = 1;
   }
 
   function drawStatic(){
-    if (!tint || !fit) return;
+    if (!mark) return;
     ctx.clearRect(0,0,W,H);
-    ctx.drawImage(tint, fit.dx, fit.dy, fit.dw, fit.dh);
+    ctx.drawImage(mark.tint, mark.dx, mark.dy, mark.dw, mark.dh);
   }
 
-  new ResizeObserver(build).observe(canvas);
+  addEventListener('resize', () => { resize(); if (markName) settle(markName, { instant: introDone }); });
+  // keep the mark glued to its slot when a screen scrolls (mobile)
+  let scrollRaf = 0;
+  addEventListener('scroll', () => {
+    if (scrollRaf || !markName || !introDone) return;
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; settle(markName, { instant: true }); });
+  }, { capture: true, passive: true });
   requestAnimationFrame(draw);
-  logoImg.onload = () => { logoReady = true; build(); };
+  logoImg.onload = () => { logoReady = true; if (markName === 'home' || !markName) settle(markName || 'home'); };
   logoImg.src = 'icons/majia_icon.svg';
+
+  window._dbgSwarm = () => mark && ({ dx:mark.dx, dy:mark.dy, dw:mark.dw, dh:mark.dh,
+    tile:mark.tile, targets:mark.targets.length, parts:particles.length, name:markName,
+    p0: particles[0] && {x:particles[0].x|0,y:particles[0].y|0,tx:particles[0].tx|0,ty:particles[0].ty|0},
+    W, H, cw: canvas.width, ch: canvas.height });
+
+  return {
+    settle,
+    burst(){ if (reduced) return;
+      for (const p of particles){ const a=Math.random()*Math.PI*2, f=2.2+Math.random()*2.6;
+        p.vx += Math.cos(a)*f; p.vy += Math.sin(a)*f; p.rotV += (Math.random()-0.5)*0.6; p.loose = true; } },
+  };
 })();
 
-/* ---------- shoji router --------------------------------------------- */
+/* ---------- router — construct / deconstruct -------------------------- */
 const screens = [...document.querySelectorAll('.screen')];
 const names = new Set(screens.map(s => s.dataset.screen));
-const shoji = document.getElementById('shoji');
 let current = 'home', transitioning = false;
 let robitApi = null, robitLoading = false;
 
@@ -296,21 +373,26 @@ function goTo(name, { instant = false } = {}){
 
   if (instant || reduced){
     screens.forEach(s => s.classList.remove('is-active','is-hidden-fx'));
-    to.classList.add('is-active'); robitApi && robitApi.setActive(name === 'robits'); return;
+    to.classList.add('is-active');
+    robitApi && robitApi.setActive(name === 'robits');
+    swarm.settle(name, { instant: true });
+    return;
   }
+
   transitioning = true;
-  shoji.classList.add('is-closed');
+  // deconstruct: content dissolves while the mark bursts into chips
   from.classList.add('is-hidden-fx');
+  swarm.burst();
   setTimeout(() => {
     from.classList.remove('is-active','is-hidden-fx');
     to.classList.add('is-hidden-fx','is-active');
     robitApi && robitApi.setActive(name === 'robits');
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      shoji.classList.remove('is-closed');
-      setTimeout(() => to.classList.remove('is-hidden-fx'), 180);
+      swarm.settle(name);                          // chips fly to the next mark
+      setTimeout(() => to.classList.remove('is-hidden-fx'), 120);
     }));
-    setTimeout(() => transitioning = false, 700);
-  }, 580);
+    setTimeout(() => transitioning = false, 800);
+  }, 400);
 }
 
 document.querySelectorAll('[data-nav]').forEach(link => {
@@ -323,6 +405,29 @@ document.querySelectorAll('[data-nav]').forEach(link => {
 });
 addEventListener('popstate', (e) => goTo(e.state?.screen || location.hash.replace('#','') || 'home'));
 
+/* swipe left / right between screens (mobile-first) */
+function navStep(dir){
+  const i = ORDER.indexOf(current);
+  const next = ORDER[i + dir];
+  if (!next || transitioning) return;
+  history.pushState({ screen: next }, '', `#${next}`);
+  goTo(next);
+}
+(() => {
+  let sx = 0, sy = 0, st = 0, tracking = false;
+  addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; st = performance.now(); tracking = true; }, { passive: true });
+  addEventListener('pointerup', (e) => {
+    if (!tracking) return; tracking = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy, dt = performance.now() - st;
+    if (dt > 1000) return;
+    if (Math.abs(dx) > 64 && Math.abs(dx) > 2.2*Math.abs(dy)) navStep(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') navStep(1);
+  else if (e.key === 'ArrowLeft') navStep(-1);
+});
+
 /* ---------- boot ----------------------------------------------------- */
 const boot = names.has(location.hash.replace('#','')) ? location.hash.replace('#','') : 'home';
 history.replaceState({ screen: boot }, '', `#${boot}`);
@@ -334,4 +439,5 @@ if (!reduced){
   const f = screenEl(boot); f.classList.add('is-hidden-fx');
   requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => f.classList.remove('is-hidden-fx'), 150)));
 }
+swarm.settle(boot);
 document.getElementById('year').textContent = new Date().getFullYear();
