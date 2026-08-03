@@ -19,11 +19,8 @@
 </head>
 <body>
 
-  <!-- Shoji transition panels -->
-  <div class="shoji" id="shoji" aria-hidden="true">
-    <div class="shoji__panel shoji__panel--l"></div>
-    <div class="shoji__panel shoji__panel--r"></div>
-  </div>
+  <!-- the swarm: one particle system writes every screen's title -->
+  <canvas id="word" aria-hidden="true"></canvas>
 
   <header class="chrome">
     <a class="chrome__mark" href="#home" data-nav="home" aria-label="Majia Studio — home">
@@ -44,8 +41,7 @@
     <!-- ============ HOME ============ -->
     <section class="screen is-active" id="screen-home" data-screen="home" aria-label="Home">
       <h1 class="sr-only">Majia Studio</h1>
-      <!-- boids logo: particles bloom, flock into the wordmark, then a crisp mark fades in -->
-      <canvas id="logo" class="logo-canvas" aria-hidden="true"></canvas>
+      <div class="word-slot word-slot--hero" data-word="MAJIA"></div>
       <div class="hero">
         <p class="hero__sub t-fx">STUDIO</p>
         <p class="hero__lede t-fx">
@@ -65,11 +61,11 @@
       <div class="robits-layout">
         <div class="robit-stage" id="robitStage">
           <canvas id="robit" class="robit-canvas" aria-label="Robit — a little machine, drawn in ink"></canvas>
-          <p class="robit-hint t-fx" id="robitHint">click to charge</p>
         </div>
         <div class="panel panel--robits">
           <p class="panel__eyebrow t-fx"><span class="pulse-dot"></span>IN DEVELOPMENT</p>
-          <h2 class="panel__title t-fx">ROBITS</h2>
+          <h2 class="sr-only">Robits</h2>
+          <div class="word-slot word-slot--title" data-word="ROBITS" data-align="left"></div>
           <p class="panel__lede t-fx">
             Little machines. Latent souls. A game about building small robots
             and the strange, quiet world they wake up into.
@@ -93,7 +89,8 @@
     <section class="screen" id="screen-studio" data-screen="studio" aria-label="Studio">
       <div class="panel">
         <p class="panel__eyebrow t-fx">WHO WE ARE</p>
-        <h2 class="panel__title t-fx">THE STUDIO</h2>
+        <h2 class="sr-only">The Studio</h2>
+        <div class="word-slot word-slot--title" data-word="STUDIO"></div>
         <p class="panel__lede t-fx">
           Majia is a small developer studio. We make our own things —
           starting with Robits — and we build for others when the work is interesting.
@@ -112,7 +109,8 @@
     <section class="screen" id="screen-signal" data-screen="signal" aria-label="Contact">
       <div class="panel panel--center">
         <p class="panel__eyebrow t-fx">OPEN CHANNEL</p>
-        <h2 class="panel__title t-fx">SIGNAL</h2>
+        <h2 class="sr-only">Signal</h2>
+        <div class="word-slot word-slot--title" data-word="SIGNAL"></div>
         <p class="panel__lede t-fx">Say hello, ask about Robits, or bring us a project.</p>
         <a class="signal-line t-fx" href="mailto:hello@majia.studio">hello@majia.studio</a>
         <p class="panel__note t-fx">Answered by humans.</p>
