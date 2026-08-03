@@ -1,7 +1,7 @@
 /* ============================================================
    MAJIA STUDIO — app
-   boids wordmark (bloom → flock → crisp mark + shimmer)
-   shoji router · theme · lazy ink robot
+   boids wordmark — Reynolds steering: elegant flow → arrive into the mark
+   (ported from the portfolio's vehicle swarm) · shoji router · theme · robit
    ============================================================ */
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -28,15 +28,15 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
   const canvas = document.getElementById('logo');
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  const GOLDEN = 2.399963229728653;   // golden angle (radians)
-  const ARRIVE_MS = 1700;             // bloom → formed
+  const TAU = Math.PI * 2;
+  const FLOW_MS = 1600;               // elegant flow before the mark forms
 
   let W = 0, H = 0, cx = 0, cy = 0, fontPx = 0;
   let particles = [];
-  let phase = 'idle';                 // 'intro' → 'settled'
+  let phase = 'idle';                 // 'flow' → 'form' → (logo fades in)
   let t0 = 0, introDone = false, logoFade = 0;
   const mouse = { x: -1e4, y: -1e4, active: false };
-  let inkRGB = '28,26,22';
+  let inkRGB = '28,26,22', sealRGB = '194,69,47';
   let bloom = 0, bloomTarget = 0;
 
   function readColors(){
@@ -44,7 +44,7 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     const toRGB = (hex) => { probe.fillStyle = hex; const m = probe.fillStyle;
       if (m[0] === '#'){ const n = parseInt(m.slice(1),16); return `${(n>>16)&255},${(n>>8)&255},${n&255}`; }
       const p = m.match(/\d+/g); return p ? p.slice(0,3).join(',') : '0,0,0'; };
-    inkRGB = toRGB(cssColor('--ink'));
+    inkRGB = toRGB(cssColor('--ink')); sealRGB = toRGB(cssColor('--seal'));
   }
   readColors(); themeListeners.add(readColors);
 
@@ -62,40 +62,63 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     return pts;
   }
 
+  // elegant ambient position: particles ride slowly-morphing lissajous / rose curves
+  function flowTarget(p, fc){
+    const sc = Math.min(W,H)/700 * dpr;
+    const si = p.si, t = p.t; p.t += p.spd;
+    const pulse = Math.sin(fc*0.0008*si + si) * si * 5 * sc;
+    if (p.fam === 0){
+      const A = p.A*sc + pulse, B = p.B*sc + pulse;
+      const xt = A*Math.sin(p.la*t), yt = B*Math.sin(p.lb*t + 0.9);
+      const rot = fc*0.0002*si;
+      return [cx + xt*Math.cos(rot) - yt*Math.sin(rot), cy + xt*Math.sin(rot) + yt*Math.cos(rot)];
+    } else {
+      const R = p.A*sc + pulse, r = R*Math.cos(p.k*t + fc*0.0001*si), rot = fc*0.00015*si;
+      return [cx + Math.cos(t+rot)*r, cy + Math.sin(t+rot)*r];
+    }
+  }
+
+  const SLOW = () => 55 * dpr;
+
   function build(){
     const rect = canvas.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
     W = Math.round(rect.width * dpr); H = Math.round(rect.height * dpr);
     canvas.width = W; canvas.height = H; cx = W/2; cy = H/2;
-    fontPx = Math.min(W * 0.26, H * 0.72);   // must match sampleTargets()
+    fontPx = Math.min(W * 0.26, H * 0.72);
     const targets = sampleTargets(W, H);
-    const Rmax = Math.max(W, H) * 0.62;
     const prev = particles;
-    particles = targets.map((t, i) => {
-      const p = prev[i] || {
-        x: 0, y: 0, vx: 0, vy: 0,
-        r: (0.8 + Math.random()*0.9) * dpr,
-        arr: 0.10 + Math.random()*0.06,          // per-particle arrive personality
-        sp: 0.6 + Math.random()*1.4,             // shimmer speed
-        ph: Math.random()*6.283,                 // shimmer phase
-        am: (0.6 + Math.random()*1.6) * dpr,     // shimmer amplitude
-      };
-      p.tx = t.x; p.ty = t.y;
-      // outward direction from the wordmark centre — for the "emanate around the outline" halo
-      const dx = t.x - cx, dy = t.y - cy, d = Math.hypot(dx, dy) || 1;
-      p.ox = dx/d; p.oy = dy/d;
+    particles = targets.map((tp, i) => {
+      const p = prev[i] || newParticle();
+      p.hx = tp.x; p.hy = tp.y;                         // home = letterform point
       return p;
     });
-    // first time it has real size → play the intro; later rebuilds (resize) keep state
     if (!introDone){
-      for (let i=0;i<particles.length;i++){
-        const p = particles[i];
-        const rr = Math.sqrt(i/particles.length) * Rmax, a = i * GOLDEN;
-        p.x = cx + Math.cos(a)*rr; p.y = cy + Math.sin(a)*rr;      // phyllotaxis bloom
-        p.vx = p.vy = 0;
+      const spawnR = Math.min(W,H) * 0.42;
+      for (const p of particles){
+        const a = Math.random()*TAU, d = Math.random()*spawnR;
+        p.x = cx + Math.cos(a)*d; p.y = cy + Math.sin(a)*d; p.vx = p.vy = 0;
       }
-      phase = 'intro'; t0 = performance.now(); logoFade = 0;
+      phase = 'flow'; t0 = performance.now(); logoFade = 0;
     }
+  }
+
+  function newParticle(){
+    const strand = Math.floor(Math.random()*6);
+    const liss = [[2,3],[3,2],[4,3],[5,4]][strand % 4];
+    return {
+      x:0, y:0, vx:0, vy:0,
+      r: (0.8 + Math.random()*0.9) * dpr,
+      ms: (7 + Math.random()*7) * dpr,          // maxSpeed
+      mf: (0.45 + Math.random()*0.6) * dpr,     // maxForce
+      fr: (26 + Math.random()*46) * dpr,        // flee radius
+      si: strand + 1,
+      fam: strand < 3 ? 0 : 1,
+      la: liss[0], lb: liss[1], k: [3,4,5][strand % 3],
+      A: 70 + strand*13, B: 62 + strand*11,
+      t: Math.random()*TAU*6, spd: 0.0004*(0.7 + Math.random()*0.6),
+      bph: Math.random()*TAU,                   // breathing phase
+    };
   }
 
   addEventListener('pointermove', (e) => {
@@ -103,64 +126,57 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     mouse.x = (e.clientX - rect.left) * dpr; mouse.y = (e.clientY - rect.top) * dpr; mouse.active = true;
   });
   addEventListener('pointerleave', () => mouse.active = false);
-
   const cta = document.querySelector('[data-morph]');
   if (cta){ cta.addEventListener('pointerenter', () => bloomTarget = 1); cta.addEventListener('pointerleave', () => bloomTarget = 0); }
 
   function tick(now){
+    const fc = now * 0.06;                       // frame-count analogue (~ matches 60fps math)
     bloom += (bloomTarget - bloom) * 0.08;
     ctx.clearRect(0,0,W,H);
-    const home = document.getElementById('screen-home').classList.contains('is-active');
-    if (home && particles.length){
-      const R = 46 * dpr, R2 = R*R;
-      const intro = phase === 'intro';
-      if (intro){
-        // switch when the swarm has actually arrived (frame-rate independent), or as a time fallback
-        let acc = 0, k = 0;
-        for (let i=0; i<particles.length; i+=17){ const p = particles[i]; acc += Math.abs(p.tx-p.x)+Math.abs(p.ty-p.y); k++; }
-        const meanErr = k ? acc/k : 0;
-        if (meanErr < 3*dpr || now - t0 > 4000){ phase = 'settled'; introDone = true; }
+    const homeVis = document.getElementById('screen-home').classList.contains('is-active');
+    if (homeVis && particles.length){
+      // phase progression
+      if (phase === 'flow' && now - t0 > FLOW_MS) phase = 'form';
+      if (phase === 'form'){
+        let acc=0,k=0; for (let i=0;i<particles.length;i+=17){ const p=particles[i]; acc+=Math.abs(p.hx-p.x)+Math.abs(p.hy-p.y); k++; }
+        if ((k && acc/k < 4*dpr) || now - t0 > FLOW_MS + 2600){ introDone = true; }
       }
-      const settled = phase === 'settled';
-      if (settled) logoFade += (1 - logoFade) * 0.05;
-      const t = now * 0.001;
-      const col = bloom > 0.02
+      if (introDone) logoFade += (1 - logoFade) * 0.05;
+
+      const slow = SLOW();
+      const cr = bloom>0.02 ? Math.round(28+(194-28)*bloom) : parseInt(inkRGB), useSeal = bloom>0.02;
+      const dotRGB = useSeal
         ? `${Math.round(28+(194-28)*bloom)},${Math.round(26+(69-26)*bloom)},${Math.round(22+(47-22)*bloom)}`
         : inkRGB;
-      ctx.fillStyle = `rgb(${col})`;
-      const alpha = settled ? 0.7 : 1;
-      ctx.globalAlpha = alpha;
 
       for (const p of particles){
-        // destination = target, plus a settled shimmer that haloes the outline
-        let dx, dy;
-        if (settled){
-          const s = Math.sin(p.ph + t*p.sp), c = Math.cos(p.ph + t*p.sp);
-          const halo = 1.4*dpr + 0.6*dpr*Math.sin(t*0.6 + p.ph);   // gentle outward breathing
-          dx = (p.tx + p.ox*halo + c*p.am) - p.x;
-          dy = (p.ty + p.oy*halo + s*p.am) - p.y;
-        } else {
-          dx = p.tx - p.x; dy = p.ty - p.y;
-        }
-        p.x += dx * p.arr * (intro ? 1.25 : 1); p.y += dy * p.arr * (intro ? 1.25 : 1);
-        // pointer shock-wave (flee), then it eases back
-        if (mouse.active){
-          const mx = p.x - mouse.x, my = p.y - mouse.y, d2 = mx*mx + my*my;
-          if (d2 < R2){ const d = Math.sqrt(d2)||1, f = (1 - d/R) * 5; p.vx += (mx/d)*f; p.vy += (my/d)*f; }
-        }
-        p.x += p.vx; p.y += p.vy; p.vx *= 0.84; p.vy *= 0.84;
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill();
+        let gx, gy;
+        if (phase === 'flow'){ const f = flowTarget(p, fc); gx=f[0]; gy=f[1]; }
+        else { const b = 1.3*dpr; gx = p.hx + Math.sin(fc*0.02 + p.bph)*b; gy = p.hy + Math.cos(fc*0.02 + p.bph)*b; }
+
+        // arrive steering
+        let dx=gx-p.x, dy=gy-p.y, d=Math.hypot(dx,dy)||1;
+        let spd = d < slow ? (d/slow)*p.ms : p.ms;
+        let ddx=dx/d*spd, ddy=dy/d*spd, sx=ddx-p.vx, sy=ddy-p.vy, sm=Math.hypot(sx,sy);
+        if (sm>p.mf){ sx=sx/sm*p.mf; sy=sy/sm*p.mf; }
+        p.vx+=sx; p.vy+=sy;
+        // mouse flee (force, never teleport)
+        if (mouse.active){ const fx=p.x-mouse.x, fy=p.y-mouse.y, fd=Math.hypot(fx,fy);
+          if (fd<p.fr && fd>0){ const fp=(1-fd/p.fr)*p.mf*6; p.vx+=fx/fd*fp; p.vy+=fy/fd*fp; } }
+        p.vx*=0.9; p.vy*=0.9; p.x+=p.vx; p.y+=p.vy;
+
+        const vel = Math.hypot(p.vx,p.vy);
+        let a = Math.max(60, 200 - vel/(11*dpr)*140) * (1 - 0.4*logoFade);
+        ctx.fillStyle = `rgba(${dotRGB},${(a/255).toFixed(3)})`;
+        const sz = p.r*(1 + vel*0.05);
+        ctx.beginPath(); ctx.arc(p.x, p.y, sz, 0, TAU); ctx.fill();
       }
-      ctx.globalAlpha = 1;
-      // crisp wordmark fades in over the settled swarm — same fillText that made the targets,
-      // so it registers exactly; particles halo just outside its strokes
+
       if (logoFade > 0.01){
-        ctx.globalAlpha = logoFade;
-        ctx.fillStyle = `rgb(${inkRGB})`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.globalAlpha = logoFade; ctx.fillStyle = `rgb(${inkRGB})`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.font = `500 ${fontPx}px "Playfair Display", Georgia, serif`;
-        ctx.fillText('MAJIA', cx, cy + fontPx*0.04);
-        ctx.globalAlpha = 1;
+        ctx.fillText('MAJIA', cx, cy + fontPx*0.04); ctx.globalAlpha = 1;
       }
     }
     requestAnimationFrame(tick);
@@ -168,9 +184,9 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
 
   function drawStatic(){ if(!W) return; ctx.clearRect(0,0,W,H);
     ctx.fillStyle=`rgb(${inkRGB})`; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font = `500 ${fontPx}px "Playfair Display", Georgia, serif`;
+    ctx.font=`500 ${fontPx}px "Playfair Display", Georgia, serif`;
     ctx.fillText('MAJIA', cx, cy + fontPx*0.04);
-    introDone = true; phase = 'settled'; logoFade = 1; }
+    introDone = true; phase = 'form'; logoFade = 1; }
 
   const rebuild = () => { build(); if (reduced) drawStatic(); };
   new ResizeObserver(rebuild).observe(canvas);
