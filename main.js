@@ -32,9 +32,11 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
   const FLOW_MS = 1600;               // elegant flow before the mark forms
 
   let W = 0, H = 0, cx = 0, cy = 0, fontPx = 0;
+  let logoReady = false, fit = null, tint = null;   // real logo (icons/majia_icon.svg)
+  const logoImg = new Image();
   let particles = [];
   let phase = 'idle';                 // 'flow' → 'form' → (logo fades in)
-  let t0 = 0, introDone = false, logoFade = 0;
+  let t0 = 0, introDone = false, spawned = false, logoFade = 0;
   const mouse = { x: -1e4, y: -1e4, active: false };
   let inkRGB = '28,26,22', sealRGB = '194,69,47';
   let bloom = 0, bloomTarget = 0;
@@ -62,6 +64,39 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     return pts;
   }
 
+  // ── real logo: detect its ink bbox, fit it to the canvas, tint to theme ──
+  function makeTint(){
+    if (!fit || !logoReady) return;
+    tint = document.createElement('canvas'); tint.width = fit.dw; tint.height = fit.dh;
+    const t = tint.getContext('2d');
+    t.drawImage(logoImg, fit.bx, fit.by, fit.bw, fit.bh, 0, 0, fit.dw, fit.dh);
+    t.globalCompositeOperation = 'source-in';                 // recolour the glyphs to --ink
+    t.fillStyle = cssColor('--ink'); t.fillRect(0, 0, fit.dw, fit.dh);
+  }
+  themeListeners.add(() => { if (fit) makeTint(); });
+
+  // sample the real logo's filled glyphs into target points (canvas/device space)
+  function sampleSVG(){
+    const iw = logoImg.naturalWidth || 1004, ih = logoImg.naturalHeight || 1010;
+    const det = document.createElement('canvas'); det.width = iw; det.height = ih;
+    const dc = det.getContext('2d'); dc.drawImage(logoImg, 0, 0, iw, ih);
+    const dd = dc.getImageData(0, 0, iw, ih).data;
+    let minX=iw, minY=ih, maxX=0, maxY=0, found=false;
+    for (let y=0;y<ih;y+=2) for (let x=0;x<iw;x+=2){ if (dd[(y*iw+x)*4+3] > 60){
+      if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; found=true; } }
+    if (!found) return null;
+    const bw = maxX-minX, bh = maxY-minY;
+    const S = Math.min(W*0.72/bw, H*0.80/bh);
+    const dw = Math.round(bw*S), dh = Math.round(bh*S);
+    fit = { dx: Math.round(cx-dw/2), dy: Math.round(cy-dh/2), dw, dh, bx: minX, by: minY, bw, bh };
+    makeTint();
+    const t = tint.getContext('2d'); const td = t.getImageData(0,0,dw,dh).data;
+    const pts = [], step = Math.max(2, Math.round(dw/300));
+    for (let y=0;y<dh;y+=step) for (let x=0;x<dw;x+=step)
+      if (td[(y*dw+x)*4+3] > 128) pts.push({ x: fit.dx+x, y: fit.dy+y });
+    return pts;
+  }
+
   // elegant ambient position: particles ride slowly-morphing lissajous / rose curves
   function flowTarget(p, fc){
     const sc = Math.min(W,H)/700 * dpr;
@@ -86,21 +121,22 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
     W = Math.round(rect.width * dpr); H = Math.round(rect.height * dpr);
     canvas.width = W; canvas.height = H; cx = W/2; cy = H/2;
     fontPx = Math.min(W * 0.26, H * 0.72);
-    const targets = sampleTargets(W, H);
+    const targets = (logoReady && sampleSVG()) || sampleTargets(W, H);
     const prev = particles;
     particles = targets.map((tp, i) => {
       const p = prev[i] || newParticle();
       p.hx = tp.x; p.hy = tp.y;                         // home = letterform point
       return p;
     });
-    if (!introDone){
+    if (!spawned){                    // first real build → play the intro once
       const spawnR = Math.min(W,H) * 0.42;
       for (const p of particles){
         const a = Math.random()*TAU, d = Math.random()*spawnR;
         p.x = cx + Math.cos(a)*d; p.y = cy + Math.sin(a)*d; p.vx = p.vy = 0;
       }
-      phase = 'flow'; t0 = performance.now(); logoFade = 0;
+      spawned = true; phase = 'flow'; t0 = performance.now(); logoFade = 0;
     }
+    // a late asset load (SVG) or resize just re-points targets; particles re-seek smoothly
   }
 
   function newParticle(){
@@ -173,25 +209,28 @@ function cssColor(v){ return getComputedStyle(document.documentElement).getPrope
       }
 
       if (logoFade > 0.01){
-        ctx.globalAlpha = logoFade; ctx.fillStyle = `rgb(${inkRGB})`;
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.font = `500 ${fontPx}px "Playfair Display", Georgia, serif`;
-        ctx.fillText('MAJIA', cx, cy + fontPx*0.04); ctx.globalAlpha = 1;
+        ctx.globalAlpha = logoFade;
+        if (tint) ctx.drawImage(tint, fit.dx, fit.dy);
+        else { ctx.fillStyle = `rgb(${inkRGB})`; ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.font = `500 ${fontPx}px "Playfair Display", Georgia, serif`; ctx.fillText('MAJIA', cx, cy + fontPx*0.04); }
+        ctx.globalAlpha = 1;
       }
     }
     requestAnimationFrame(tick);
   }
 
   function drawStatic(){ if(!W) return; ctx.clearRect(0,0,W,H);
-    ctx.fillStyle=`rgb(${inkRGB})`; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font=`500 ${fontPx}px "Playfair Display", Georgia, serif`;
-    ctx.fillText('MAJIA', cx, cy + fontPx*0.04);
-    introDone = true; phase = 'form'; logoFade = 1; }
+    if (tint) ctx.drawImage(tint, fit.dx, fit.dy);
+    else { ctx.fillStyle=`rgb(${inkRGB})`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.font=`500 ${fontPx}px "Playfair Display", Georgia, serif`; ctx.fillText('MAJIA', cx, cy + fontPx*0.04); }
+    introDone = true; spawned = true; phase = 'form'; logoFade = 1; }
 
   const rebuild = () => { build(); if (reduced) drawStatic(); };
   new ResizeObserver(rebuild).observe(canvas);
   if (!reduced) requestAnimationFrame(tick);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(rebuild);
+  logoImg.onload = () => { logoReady = true; rebuild(); };
+  logoImg.src = 'icons/majia_icon.svg';
 })();
 
 /* ---------- shoji router --------------------------------------------- */
