@@ -165,11 +165,6 @@ body::before {
   width: min(500px, 44vw); height: min(560px, 66vh); display: block; cursor: pointer;
   touch-action: none;
 }
-.robit-hint {
-  position: absolute; bottom: 0.5rem; left: 0; right: 0; text-align: center;
-  font-size: 0.6rem; letter-spacing: 0.3em; text-transform: uppercase;
-  color: var(--ink-dim); opacity: 0.6; pointer-events: none;
-}
 .panel--robits { text-align: left; max-width: 30rem; flex: 0 1 380px; }
 .panel--robits .panel__eyebrow, .panel--robits .panel__actions { justify-content: flex-start; }
 .panel--robits .panel__lede, .panel--robits .spec-grid { margin-left: 0; margin-right: 0; }

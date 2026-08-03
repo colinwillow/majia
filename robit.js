@@ -95,6 +95,47 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
   const DROP_FROM = 3.1;
   const clips = {};
 
+  /* ── the floating landing pad from the game's title screen, in ink ── */
+  const PAD_R = 1.14, PAD_TH = 0.19;
+  let pad = null, padSpin = null, shadow = null, bobT = 0;
+  const edgeMats = [], sealMats = [];
+  function buildPad(){
+    const g = new THREE.Group();
+    const ink = () => { const m = new THREE.LineBasicMaterial({ color: hexToColor(cvar('--ink')), transparent:true, opacity:0.85 }); edgeMats.push(m); return m; };
+    const toon = () => { const m = new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:GRAD }); toonMats.push(m); return m; };
+    const seal = () => { const m = new THREE.MeshBasicMaterial({ color: hexToColor(cvar('--seal')) }); sealMats.push(m); return m; };
+    const edge = (geo) => new THREE.LineSegments(new THREE.EdgesGeometry(geo), ink());
+    // static deck the robit stands on
+    const baseGeo = new THREE.CylinderGeometry(PAD_R, PAD_R*0.9, PAD_TH, 48);
+    const base = new THREE.Mesh(baseGeo, toon()); base.position.y = -PAD_TH/2; g.add(base);
+    const lip = edge(baseGeo); lip.position.y = -PAD_TH/2; g.add(lip);
+    // inner accent ring — the one spot of colour
+    const inring = new THREE.Mesh(new THREE.TorusGeometry(PAD_R*0.55, 0.02, 8, 44), seal());
+    inring.rotation.x = Math.PI/2; inring.position.y = 0.015; g.add(inring);
+    // spinning outer assembly: rim ring + four bays with struts and jet pods
+    padSpin = new THREE.Group(); g.add(padSpin);
+    const rimGeo = new THREE.TorusGeometry(PAD_R*0.99, 0.028, 8, 56);
+    const rim = new THREE.Mesh(rimGeo, toon()); rim.rotation.x = Math.PI/2; rim.position.y = 0.01; padSpin.add(rim);
+    const rimE = edge(rimGeo); rimE.rotation.x = Math.PI/2; rimE.position.y = 0.01; padSpin.add(rimE);
+    const bw = PAD_R*0.46, bd = PAD_R*0.26, bh = PAD_TH*1.5;
+    for (let i=0;i<4;i++){
+      const a = i*Math.PI/2, cx = Math.cos(a)*PAD_R*0.97, cz = Math.sin(a)*PAD_R*0.97, dx = Math.cos(a), dz = Math.sin(a);
+      const bg = new THREE.BoxGeometry(bd, bh, bw);
+      const blk = new THREE.Mesh(bg, toon()); blk.position.set(cx, -PAD_TH/2 + bh*0.12, cz); blk.rotation.y = -a; padSpin.add(blk);
+      const be = edge(bg); be.position.copy(blk.position); be.rotation.y = -a; padSpin.add(be);
+      const armLen = PAD_R*0.3, ex = cx + dx*armLen, ez = cz + dz*armLen, ay = -PAD_TH/2 - bh*0.05;
+      const ag = new THREE.BoxGeometry(armLen, 0.06, bw*0.45);
+      const arm = new THREE.Mesh(ag, toon()); arm.position.set((cx+ex)/2, ay, (cz+ez)/2); arm.rotation.y = -a; padSpin.add(arm);
+      const ae = edge(ag); ae.position.copy(arm.position); ae.rotation.y = -a; padSpin.add(ae);
+      const podGeo = new THREE.CylinderGeometry(bw*0.16, bw*0.24, 0.13, 14);
+      const pod = new THREE.Mesh(podGeo, toon()); pod.position.set(ex, ay-0.05, ez); padSpin.add(pod);
+      const pe = edge(podGeo); pe.position.copy(pod.position); padSpin.add(pe);
+      const jring = new THREE.Mesh(new THREE.TorusGeometry(bw*0.2, 0.016, 8, 20), seal());
+      jring.rotation.x = Math.PI/2; jring.position.set(ex, ay-0.11, ez); padSpin.add(jring);
+    }
+    return g;
+  }
+
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const gltf = await loader.loadAsync('./models/robot.glb');
   model = gltf.scene;
@@ -114,11 +155,11 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     const box = boneBox(); if (!box) return;
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
-    // bones under-cover the surface; pad, but tighter now so he reads bigger
-    const r = Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.3 + 0.12;
+    // bones under-cover the surface; pad the margin, and include the landing pad
+    const r = Math.max(Math.max(size.x, size.y * 0.9, size.z) * 0.5 * 1.3 + 0.12, PAD_R * 1.18);
     const fov = cam.fov*Math.PI/180, hfov = 2*Math.atan(Math.tan(fov/2)*cam.aspect);
     const dist = (r/Math.sin(Math.min(fov,hfov)/2)) * 1.06;
-    fitState.cx = center.x; fitState.cy = center.y + size.y * 0.06; fitState.cz = center.z; fitState.dist = dist;
+    fitState.cx = center.x; fitState.cy = center.y - size.y * 0.02; fitState.cz = center.z; fitState.dist = dist;
     applyFit();
   }
   function applyFit(){
@@ -161,10 +202,27 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     if (bb){ const c = new THREE.Vector3(); bb.getCenter(c);
       model.position.x -= c.x; model.position.z -= c.z;
       model.updateWorldMatrix(true, true); }
+    // the floating landing pad appears under his feet (title-screen style)
+    if (!pad){
+      const bb2 = boneBox();
+      const feetY = bb2 ? bb2.min.y - 0.05 : -TARGET/2;
+      pad = buildPad(); pad.position.y = feetY; pad.userData.baseY = feetY;
+      scene.add(pad);                              // the pad waits; he drops onto it
+      shadow = new THREE.Mesh(new THREE.CircleGeometry(PAD_R*0.95, 40),
+        new THREE.MeshBasicMaterial({ color: hexToColor(cvar('--ink')), transparent:true, opacity:0.09 }));
+      shadow.rotation.x = -Math.PI/2; shadow.position.y = feetY - 0.5; scene.add(shadow);
+    }
   }
 
-  // theme: outline follows ink colour
-  function syncTheme(){ const c = hexToColor(cvar('--ink')); for (const m of outlineMats) m.color.copy(c); }
+  // theme: outlines + pad linework follow ink; accents follow seal
+  function syncTheme(){
+    const c = hexToColor(cvar('--ink'));
+    for (const m of outlineMats) m.color.copy(c);
+    for (const m of edgeMats) m.color.copy(c);
+    const s = hexToColor(cvar('--seal'));
+    for (const m of sealMats) m.color.copy(s);
+    if (shadow) shadow.material.color.copy(c);
+  }
   themeListeners.add(syncTheme); syncTheme();
 
   // colour bloom (0 = ink, 1 = full seal) — the 2D→3D "warp into colour"
@@ -223,6 +281,15 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
         landAction.crossFadeTo(idleAction.reset().play(), 0.25, false);
         dropState = 'idle';
       }
+    }
+    // pad life: outer assembly spins; once he's landed, the whole rig hovers
+    if (padSpin) padSpin.rotation.y += dt * 0.5;
+    if (dropState === 'idle'){
+      bobT += dt;
+      const bob = Math.sin(bobT * 1.15) * 0.045;
+      pivot.position.y = bob;                          // he and the pad hover together
+      if (pad) pad.position.y = pad.userData.baseY + bob;
+      if (shadow) shadow.material.opacity = 0.09 - bob * 0.4;
     }
     bloom += (bloomTarget - bloom) * 0.1; setBloom();
     renderer.render(scene, cam);

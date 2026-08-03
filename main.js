@@ -183,7 +183,9 @@ const swarm = (() => {
   }
 
   /* retarget the swarm onto a (new) mark — reuse bodies, spawn/retire the rest */
-  function applyMark(m, name, { instant = false } = {}){
+  function applyMark(m, name, { instant = false, explode = false } = {}){
+    const prevCx = mark ? mark.dx + mark.dw/2 : W/2;
+    const prevCy = mark ? mark.dy + mark.dh/2 : H/2;
     mark = m; markName = name;
     const F = m.dh;
     const n = m.targets.length;
@@ -191,7 +193,7 @@ const swarm = (() => {
     for (let i=n; i<particles.length; i++){
       const p = particles[i];
       const a = Math.random()*Math.PI*2;
-      p.vx += Math.cos(a)*6; p.vy += Math.sin(a)*6; p.life = 1;
+      p.vx += Math.cos(a)*9; p.vy += Math.sin(a)*9; p.life = 1;
       fading.push(p);
     }
     particles.length = Math.min(particles.length, n);
@@ -200,9 +202,28 @@ const swarm = (() => {
       if (particles[i]){
         const p = particles[i];
         p.tx=t.x; p.ty=t.y; p.sx=t.sx; p.sy=t.sy;
-        p.maxSpeed = (9.0 + Math.random()*10.0)*(F/130);
-        if (instant){ p.x=t.x; p.y=t.y; p.vx=p.vy=0; p.rot=0; p.rotV=0; p.loose=false; }
-        else { p.loose = true; p.rotV += (Math.random()-0.5)*0.5; }
+        if (instant){ p.x=t.x; p.y=t.y; p.vx=p.vy=0; p.rot=0; p.rotV=0; p.loose=false;
+          p.maxSpeed = (9.0 + Math.random()*10.0)*(F/130); continue; }
+        p.loose = true;
+        // travel speed scales with distance so long flights stay quick,
+        // and the underdamped springs overshoot + correct on arrival
+        const dist = Math.hypot(t.x-p.x, t.y-p.y);
+        p.maxSpeed = (15 + Math.random()*12) * (F/130) * Math.min(Math.max(dist/260, 1), 2.6);
+        p.k = 0.026 + Math.random()*0.05;
+        if (explode){
+          // organized burst: radial from the old mark's centre with a swirl,
+          // flowing straight into the new formation — no stall between
+          const ex = p.x - prevCx, ey = p.y - prevCy;
+          const el = Math.hypot(ex, ey) || 1;
+          const swirl = (i % 2 ? 1 : -1) * (0.35 + (i % 7)/7 * 0.5);
+          const ux = ex/el, uy = ey/el;
+          const mag = 9 + (i % 5)/5 * 8;
+          p.vx += (ux - uy*swirl) * mag;
+          p.vy += (uy + ux*swirl) * mag;
+          p.rotV += (Math.random()-0.5)*0.9;
+        } else {
+          p.rotV += (Math.random()-0.5)*0.5;
+        }
       } else {
         particles.push(newParticle(t, F, instant));
         if (!instant) particles[i].loose = true;
@@ -216,7 +237,7 @@ const swarm = (() => {
     const m = buildMark(name);
     if (!m){ retryTimer = setTimeout(() => settle(name, opts), 60); return; }
     const first = !spawned;
-    applyMark(m, name, { instant: reduced || opts.instant });
+    applyMark(m, name, { instant: reduced || opts.instant, explode: opts.explode && !reduced });
     if (first){ spawned = true; t0 = performance.now(); }
     if (reduced) drawStatic();
   }
@@ -347,12 +368,7 @@ const swarm = (() => {
   logoImg.onload = () => { logoReady = true; if (markName === 'home' || !markName) settle(markName || 'home'); };
   logoImg.src = 'icons/majia_icon.svg';
 
-  return {
-    settle,
-    burst(){ if (reduced) return;
-      for (const p of particles){ const a=Math.random()*Math.PI*2, f=2.2+Math.random()*2.6;
-        p.vx += Math.cos(a)*f; p.vy += Math.sin(a)*f; p.rotV += (Math.random()-0.5)*0.6; p.loose = true; } },
-  };
+  return { settle };
 })();
 
 /* ---------- router — construct / deconstruct -------------------------- */
@@ -391,19 +407,17 @@ function goTo(name, { instant = false } = {}){
   }
 
   transitioning = true;
-  // deconstruct: content dissolves while the mark bursts into chips
+  // deconstruct/construct crossfade: the next screen is laid out (invisible)
+  // immediately, so the mark explodes and flies STRAIGHT to its new home
   from.classList.add('is-hidden-fx');
-  swarm.burst();
-  setTimeout(() => {
-    from.classList.remove('is-active','is-hidden-fx');
-    to.classList.add('is-hidden-fx','is-active');
-    robitApi && robitApi.setActive(name === 'robits');
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      swarm.settle(name);                          // chips fly to the next mark
-      setTimeout(() => to.classList.remove('is-hidden-fx'), 120);
-    }));
+  to.classList.add('is-hidden-fx','is-active');
+  robitApi && robitApi.setActive(name === 'robits');
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    swarm.settle(name, { explode: true });
+    setTimeout(() => to.classList.remove('is-hidden-fx'), 240);
+    setTimeout(() => from.classList.remove('is-active','is-hidden-fx'), 460);
     setTimeout(() => transitioning = false, 800);
-  }, 400);
+  }));
 }
 
 document.querySelectorAll('[data-nav]').forEach(link => {
