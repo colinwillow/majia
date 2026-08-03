@@ -26,7 +26,12 @@ document.getElementById('themeFlip').addEventListener('click', () => applyTheme(
 function cssColor(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || '#000'; }
 
 const ORDER = ['home','robits','studio','signal'];
-const WORDS = { robits:'ROBITS', studio:'STUDIO', signal:'SIGNAL' };
+// robits wears the game's own title face (Orbitron 900, like the start screen)
+const WORDS = {
+  robits: { text:'ROBITS', font:'900', family:'Orbitron, sans-serif', ls:0.06, base:0.52 },
+  studio: { text:'STUDIO', font:'500', family:'"Playfair Display", Georgia, serif', ls:0.08, base:0.54 },
+  signal: { text:'SIGNAL', font:'500', family:'"Playfair Display", Georgia, serif', ls:0.08, base:0.54 },
+};
 
 /* ---------- the tile swarm ------------------------------------------- */
 const swarm = (() => {
@@ -41,7 +46,7 @@ const swarm = (() => {
   let logoReady = false;
   const logoImg = new Image();
   let spawned = false, t0 = 0, introDone = false;
-  const mouse = { x: -1e4, y: -1e4, active: false };
+  const mouse = { x: -1e4, y: -1e4, active: false, str: 0 };
   let bloom = 0, bloomTarget = 0;
   let retryTimer = 0;
 
@@ -92,19 +97,19 @@ const swarm = (() => {
     return { art, dw, dh };
   }
 
-  function textArt(word, maxW, maxH){
+  function textArt(spec, maxW, maxH){
     const probe = document.createElement('canvas').getContext('2d');
-    const setFont = (c, px) => { c.font = `500 ${px}px "Playfair Display", Georgia, serif`;
-      if ('letterSpacing' in c) c.letterSpacing = (px*0.08)+'px'; };
+    const setFont = (c, px) => { c.font = `${spec.font} ${px}px ${spec.family}`;
+      if ('letterSpacing' in c) c.letterSpacing = (px*spec.ls)+'px'; };
     setFont(probe, 100);
-    const w100 = Math.max(1, probe.measureText(word).width);
+    const w100 = Math.max(1, probe.measureText(spec.text).width);
     const px = Math.min(maxH*0.94, maxW/w100*100);
     const dw = Math.max(2, Math.ceil(w100*px/100) + 4), dh = Math.max(2, Math.ceil(px*1.06));
     const art = document.createElement('canvas'); art.width = Math.round(dw*DPR); art.height = Math.round(dh*DPR);
     const a = art.getContext('2d');
     a.scale(DPR, DPR); setFont(a, px);
     a.fillStyle = '#000'; a.textAlign = 'center'; a.textBaseline = 'middle';
-    a.fillText(word, dw/2, dh*0.54);
+    a.fillText(spec.text, dw/2, dh*spec.base);
     return { art, dw, dh };
   }
 
@@ -217,7 +222,16 @@ const swarm = (() => {
   }
 
   addEventListener('pointermove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; });
+  addEventListener('pointerdown', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; });
+  // lift your finger and the circle of influence eases away (mouse.str fades in tick)
+  addEventListener('pointerup', () => mouse.active = false);
+  addEventListener('pointercancel', () => mouse.active = false);
   addEventListener('pointerleave', () => mouse.active = false);
+  // rasterize titles with the real fonts once they land
+  if (document.fonts){
+    try { document.fonts.load('900 100px Orbitron'); } catch(_){}
+    document.fonts.ready.then(() => { if (markName) settle(markName, { instant: introDone }); });
+  }
 
   const cta = document.querySelector('[data-morph]');
   if (cta){ cta.addEventListener('pointerenter', () => bloomTarget = 1); cta.addEventListener('pointerleave', () => bloomTarget = 0); }
@@ -247,12 +261,14 @@ const swarm = (() => {
     const lock = introDone ? 1 : clamp01((e-LOCK_START)/(FREEZE_AT-LOCK_START));
     if (lock >= 1) introDone = true;
 
-    if (introDone && mouse.active){
+    // influence strength eases in while touching, eases away on release
+    mouse.str += ((mouse.active ? 1 : 0) - mouse.str) * (mouse.active ? 0.35 : 0.12);
+    if (introDone && mouse.str > 0.03){
       const R = 46, R2 = R*R;
       for (const p of particles){
         const mx = p.x-mouse.x, my = p.y-mouse.y, d2 = mx*mx+my*my;
-        if (d2 < R2){ const d = Math.sqrt(d2)||1, f = (1-d/R)*3.2;
-          p.vx += mx/d*f; p.vy += my/d*f; p.rotV += (Math.random()-0.5)*0.4; p.loose = true; }
+        if (d2 < R2){ const d = Math.sqrt(d2)||1, f = (1-d/R)*3.2*mouse.str;
+          p.vx += mx/d*f; p.vy += my/d*f; p.rotV += (Math.random()-0.5)*0.4*mouse.str; p.loose = true; }
       }
     }
 
@@ -330,11 +346,6 @@ const swarm = (() => {
   requestAnimationFrame(draw);
   logoImg.onload = () => { logoReady = true; if (markName === 'home' || !markName) settle(markName || 'home'); };
   logoImg.src = 'icons/majia_icon.svg';
-
-  window._dbgSwarm = () => mark && ({ dx:mark.dx, dy:mark.dy, dw:mark.dw, dh:mark.dh,
-    tile:mark.tile, targets:mark.targets.length, parts:particles.length, name:markName,
-    p0: particles[0] && {x:particles[0].x|0,y:particles[0].y|0,tx:particles[0].tx|0,ty:particles[0].ty|0},
-    W, H, cw: canvas.width, ch: canvas.height });
 
   return {
     settle,
