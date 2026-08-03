@@ -167,12 +167,17 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     cam.lookAt(fitState.cx, fitState.cy, fitState.cz); cam.updateProjectionMatrix();
   }
 
-  // one-time optical centring: measure the rendered silhouette and nudge the
-  // camera so what the EYE sees is centred (bone boxes lie about visual mass)
-  let opticFix = 0;   // 0 = pending, 1 = scheduled window, 2 = done
-  let opticT = 0;
-  function opticCenter(){
+  /* one-time optical alignment, BEFORE he drops: render the robot alone
+     (pad hidden) for a single unseen frame, measure his silhouette, and
+     shift the MODEL so his visual mass sits dead over the pad centre.
+     Runs inside one rAF, so only the corrected frame is ever presented. */
+  function opticAlign(){
     try {
+      const padWasVisible = pad && pad.visible, shWasVisible = shadow && shadow.visible;
+      if (pad) pad.visible = false;
+      if (shadow) shadow.visible = false;
+      pivot.visible = true; pivot.position.y = 0;
+      renderer.render(scene, cam);
       const src = renderer.domElement;
       const w = 160, h = Math.max(2, Math.round(160 * src.height / src.width));
       const c2 = document.createElement('canvas'); c2.width = w; c2.height = h;
@@ -182,11 +187,14 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
       let minX=w, maxX=0, found=false;
       for (let y=0; y<h; y+=2) for (let x=0; x<w; x++)
         if (dd[(y*w+x)*4+3] > 30){ if (x<minX) minX=x; if (x>maxX) maxX=x; found=true; }
-      if (!found) return;
-      const offN = ((minX+maxX)/2)/w - 0.5;               // silhouette centre vs frame centre
-      const viewW = 2*Math.tan(cam.fov*Math.PI/360)*fitState.dist*cam.aspect;
-      fitState.cx += offN * viewW;
-      applyFit();
+      if (found){
+        const offN = ((minX+maxX)/2)/w - 0.5;             // his silhouette vs frame centre
+        const viewW = 2*Math.tan(cam.fov*Math.PI/360)*fitState.dist*cam.aspect;
+        model.position.x -= offN * viewW;                 // move HIM, not the camera → lands on the pad
+        model.updateWorldMatrix(true, true);
+      }
+      if (pad) pad.visible = padWasVisible;
+      if (shadow) shadow.visible = shWasVisible;
     } catch(_){}
   }
 
@@ -258,7 +266,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     running = true;
     const dt = Math.min(clock.getDelta(), 0.05);
     if (mixer) mixer.update(dt);
-    if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); framed = true; startDrop(); }
+    if (!framed && resize() && warm++ > 3){ normalizeOnce(); fitCamera(); opticAlign(); framed = true; startDrop(); }
     // assemble: he falls in from above, lands, then settles into idle
     if (dropState === 'drop'){
       dropV += 14 * dt;
@@ -271,7 +279,7 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
           landDur = Math.min(Math.max(land.duration, 0.3), 1.2);  // cap — never trust a baked-out timeline
           landAction = mixer.clipAction(land);
           landAction.reset(); landAction.setLoop(THREE.LoopOnce); landAction.clampWhenFinished = false;
-          idleAction.crossFadeTo(landAction, 0.08, false); landAction.play();
+          idleAction.crossFadeTo(landAction, 0.16, false); landAction.play();
         } else dropState = 'idle';
       }
     }
@@ -293,11 +301,6 @@ export async function initRobit({ canvas, theme, themeListeners, reduced }){
     }
     bloom += (bloomTarget - bloom) * 0.1; setBloom();
     renderer.render(scene, cam);
-    // after he lands and settles, centre on the visible silhouette (once)
-    if (opticFix < 2 && framed && dropState === 'idle'){
-      opticT += dt;
-      if (opticT > 0.5){ opticCenter(); opticFix = 2; }
-    }
     requestAnimationFrame(loop);
   }
 
